@@ -1,13 +1,10 @@
 # bonsai
 
-**bonsai** is a modern educational game engine built in C++ with production-style architecture.
+bonsai is a modern C++ game engine project built with production-style architecture.
 
-Its purpose is twofold:
+The project is intended to demonstrate how a serious engine can be structured, validated, and evolved over time. It emphasizes clean subsystem boundaries, incremental progress, and long-term maintainability.
 
-1. teach experienced programmers how engine subsystems are designed, connected, and validated
-2. serve as a serious portfolio-quality open-source codebase
-
-bonsai is not intended to be a toy engine, a one-off experiment, or a feature race against commercial engines. It is being built milestone by milestone with explicit architectural boundaries, tests from the beginning, and runnable demonstrations as early as practical.
+bonsai is not a toy engine, a one-off graphics experiment, or a race to replicate commercial engine feature breadth. It is being built through deliberate milestones with explicit architectural boundaries, tests from the beginning, and runnable demonstrations as early as practical.
 
 ## Project Goals
 
@@ -30,17 +27,16 @@ Secondary audience:
 ## Project Character
 
 bonsai is:
-- educational first
 - production-style in standards and organization
-- incremental and milestone-driven
 - architecture-led rather than renderer-led
-- designed for clarity, teachability, and maintainability
+- incremental in scope and validation
+- designed for clarity, maintainability, and demonstrable progress
 
 bonsai is not:
 - a commercial competitor to Unity, Unreal, or Godot
 - a build-everything-yourself stunt project
 - a dumping ground for unrelated graphics experiments
-- a codebase optimized for maximum abstraction from day one
+- a codebase optimized for premature abstraction
 
 ## “From Scratch” Philosophy
 
@@ -70,22 +66,22 @@ Every major subsystem in bonsai belongs primarily to one of these domains:
 
 ## Development Approach
 
-The engine will be built chapter by chapter and checkpoint by checkpoint.
+bonsai is developed through small, validated milestones.
 
-Each checkpoint is intentionally small and must define:
+Each milestone should define:
 - what is being added
 - why it is being added now
-- what files are created or updated
-- what should compile or run
+- what artifacts or files are introduced
+- what should build, run, or demonstrate visible progress
 - what must be verified manually
-- what automated tests must pass
+- what automated tests or checks must pass
 - what is explicitly out of scope for that step
 
 ## Repository Status
 
-This repository is currently in **Chapter 0: project definition**.
+bonsai is currently in the initial project-definition and repository-foundation phase.
 
-Implementation begins in Chapter 1 after the project vision, design principles, scope boundaries, roadmap, repository structure, and development standards are explicitly documented.
+Implementation begins once the project direction, design principles, roadmap, and repository shape are aligned well enough to support disciplined growth.
 
 ## Long-Term Outcome
 

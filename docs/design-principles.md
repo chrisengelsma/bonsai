@@ -1,6 +1,8 @@
 # Design Principles
 
-These principles govern the architecture of bonsai.
+These principles govern architecture and implementation decisions in bonsai.
+
+They are intended to be used actively. When a design decision is unclear, these principles should help determine whether a change belongs now, belongs later, or does not belong at all.
 
 ## 1. Clarity over cleverness
 
@@ -12,7 +14,7 @@ Third-party libraries may support implementation, but they must not dictate subs
 
 ## 3. Clean subsystem boundaries
 
-Every major feature belongs primarily to one of the engine’s top-level subsystem domains. Boundary violations must be treated as design problems, not conveniences.
+Every major feature belongs primarily to one of the engine’s top-level subsystem domains. Boundary violations should be treated as design problems, not conveniences.
 
 ## 4. Composition before inheritance
 

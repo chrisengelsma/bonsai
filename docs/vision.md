@@ -2,9 +2,9 @@
 
 ## Project Vision
 
-bonsai is a modern educational game engine in C++ built with production-style architecture.
+bonsai is a modern C++ game engine project built with production-style architecture.
 
-The project exists to make game engine architecture understandable through deliberate, incremental construction. It should show not only what subsystems exist in an engine, but why they exist, how they interact, where their boundaries should be, and how to validate them as the engine evolves.
+The project exists to demonstrate how a serious engine can be designed, structured, validated, and evolved over time. It should make subsystem responsibilities, boundaries, and tradeoffs clear while remaining practical to build and maintain.
 
 ## What bonsai is trying to become
 
@@ -16,28 +16,29 @@ bonsai should grow into a small but serious engine that can:
 - host small demos that exercise engine capabilities honestly
 
 The project should be valuable both as:
-- an educational resource for experienced engineers
-- a portfolio artifact demonstrating strong software architecture
+- a serious software architecture case study
+- a portfolio artifact demonstrating engineering judgment
+- a clean open-source codebase that others can study and extend
 
 ## What success looks like
 
-Success does not mean “largest feature count.”
+Success does not mean the largest feature count.
 
 Success means:
 - the architecture is coherent
-- the repository tells a clear story
-- subsystem responsibilities are understandable
+- the repository tells a clear engineering story
+- subsystem responsibilities remain understandable
 - progress is validated at each milestone
-- the engine can support increasingly rich demos without architectural collapse
+- the engine can support increasingly richer demos without architectural collapse
 
 ## Vision constraints
 
 The project must remain:
-- teachable
 - maintainable
 - milestone-driven
 - explicit about tradeoffs
 - realistic about scope
+- disciplined about subsystem boundaries
 
 The project must avoid:
 - premature generalization
