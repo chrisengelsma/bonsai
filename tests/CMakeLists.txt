@@ -12,12 +12,19 @@ list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 
 add_executable(bonsai_foundation_tests
         foundation/version_tests.cpp
+        runtime/runtime_tests.cpp
 )
 
 target_link_libraries(bonsai_foundation_tests
         PRIVATE
         bonsai_foundation
+        bonsai_runtime
         Catch2::Catch2WithMain
+)
+
+target_compile_features(bonsai_foundation_tests
+        PRIVATE
+        cxx_std_20
 )
 
 bonsai_apply_warnings(bonsai_foundation_tests)
@@ -29,6 +36,11 @@ add_executable(bonsai_foundation_smoke
 target_link_libraries(bonsai_foundation_smoke
         PRIVATE
         bonsai_foundation
+)
+
+target_compile_features(bonsai_foundation_smoke
+        PRIVATE
+        cxx_std_20
 )
 
 bonsai_apply_warnings(bonsai_foundation_smoke)
