@@ -10,6 +10,8 @@ signal grow_speed_changed(value: float)
 signal random_factor_changed(value: float)
 signal grow_step_pressed
 signal main_menu_pressed
+signal bark_mode_changed(mode_index: int)
+signal skeleton_guides_changed(enabled: bool)
 
 @onready var preset_option: OptionButton = %PresetOption
 @onready var axiom_field: LineEdit = %AxiomField
@@ -30,6 +32,8 @@ signal main_menu_pressed
 @onready var speed_label: Label = %SpeedLabel
 @onready var random_slider: HSlider = %RandomSlider
 @onready var random_label: Label = %RandomLabel
+@onready var bark_mode_option: OptionButton = %BarkModeOption
+@onready var skeleton_guides_toggle: CheckButton = %SkeletonGuidesToggle
 @onready var grow_step_button: Button = %GrowStepButton
 @onready var apply_button: Button = %ApplyButton
 @onready var reset_button: Button = %ResetButton
@@ -51,6 +55,8 @@ func _ready() -> void:
 	children_slider.value_changed.connect(_on_children_changed)
 	speed_slider.value_changed.connect(_on_speed_changed)
 	random_slider.value_changed.connect(_on_random_changed)
+	bark_mode_option.item_selected.connect(_on_bark_mode_selected)
+	skeleton_guides_toggle.toggled.connect(_on_skeleton_guides_toggled)
 	grow_step_button.pressed.connect(func(): grow_step_pressed.emit())
 	apply_button.pressed.connect(_emit_apply)
 	reset_button.pressed.connect(func(): reset_tree_pressed.emit())
@@ -154,6 +160,18 @@ func _on_random_changed(value: float) -> void:
 	random_label.text = "Random factor: %.0f%%" % (value * 100.0)
 	if not _syncing:
 		random_factor_changed.emit(value)
+
+
+func _on_bark_mode_selected(index: int) -> void:
+	if _syncing:
+		return
+	bark_mode_changed.emit(index)
+
+
+func _on_skeleton_guides_toggled(enabled: bool) -> void:
+	if _syncing:
+		return
+	skeleton_guides_changed.emit(enabled)
 
 
 func _update_labels() -> void:

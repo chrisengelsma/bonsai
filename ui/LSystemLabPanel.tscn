@@ -187,6 +187,25 @@ max_value = 1.0
 step = 0.05
 value = 0.0
 
+[node name="BarkModeLabel" type="Label" parent="Panel/Scroll/VBox"]
+layout_mode = 2
+text = "Branch rendering"
+
+[node name="BarkModeOption" type="OptionButton" parent="Panel/Scroll/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+item_count = 2
+popup/item_0/text = "Cylinders"
+popup/item_0/id = 0
+popup/item_1/text = "Tessellated bark"
+popup/item_1/id = 1
+selected = 1
+
+[node name="SkeletonGuidesToggle" type="CheckButton" parent="Panel/Scroll/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Show skeleton guide rings"
+
 [node name="GrowStepButton" type="Button" parent="Panel/Scroll/VBox"]
 unique_name_in_owner = true
 layout_mode = 2

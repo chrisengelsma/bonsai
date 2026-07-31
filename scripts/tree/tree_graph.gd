@@ -494,6 +494,56 @@ func prepare_all_profiles_for_render() -> void:
 		var node = nodes[node_id]
 		if not node.children.is_empty():
 			_update_parent_fork_profile(node)
+		_refresh_ring_sample_radii(node)
+
+
+func get_bark_guide_samples(node_id: int, guide_spacing: float, angle_keep_deg: float = 8.0) -> Array:
+	if not nodes.has(node_id):
+		return []
+	var node = nodes[node_id]
+	ensure_profile_render_ready(node)
+	var guides: Array = decimate_ring_samples(node.ring_samples, guide_spacing, angle_keep_deg)
+	return _samples_with_radii(node_id, guides)
+
+
+static func decimate_ring_samples(samples: Array, min_spacing: float, angle_keep_deg: float = 8.0) -> Array:
+	if samples.size() <= 2:
+		return samples.duplicate()
+
+	var angle_keep: float = deg_to_rad(angle_keep_deg)
+	var kept: Array = [samples[0].duplicate()]
+	for i in range(1, samples.size() - 1):
+		var sample: Dictionary = samples[i]
+		var prev: Dictionary = kept[-1]
+		var dist_gap: float = float(sample.get("dist", 0.0)) - float(prev.get("dist", 0.0))
+		var prev_dir: Vector3 = prev.get("dir", Vector3.UP)
+		var sample_dir: Vector3 = sample.get("dir", Vector3.UP)
+		var bend: float = prev_dir.angle_to(sample_dir)
+		if dist_gap >= min_spacing or bend >= angle_keep:
+			kept.append(sample.duplicate())
+
+	var last: Dictionary = samples[-1]
+	var tail: Dictionary = kept[-1]
+	if float(last.get("dist", 0.0)) - float(tail.get("dist", 0.0)) > 0.001:
+		kept.append(last.duplicate())
+	elif kept.size() == 1:
+		kept.append(last.duplicate())
+	else:
+		kept[-1] = last.duplicate()
+	return kept
+
+
+func _samples_with_radii(node_id: int, samples: Array) -> Array:
+	var result: Array = []
+	for sample in samples:
+		if sample is Dictionary:
+			var dist: float = float(sample.get("dist", 0.0))
+			result.append({
+				"dist": dist,
+				"dir": sample.get("dir", Vector3.UP),
+				"r": get_radius_at_dist(node_id, dist),
+			})
+	return result
 
 
 func _accumulate_cambium_on_path(node_id: int, delta: float, pattern) -> void:
@@ -522,8 +572,11 @@ func _max_radius_for_node(node, pattern) -> float:
 	return target * (1.0 + node.age * 0.05) + node.cambium_thickness * 0.35
 
 
-func _refresh_ring_sample_radii(_node) -> void:
-	pass
+func _refresh_ring_sample_radii(node) -> void:
+	for sample in node.ring_samples:
+		if sample is Dictionary:
+			var dist: float = float(sample.get("dist", 0.0))
+			sample["r"] = get_radius_at_dist(node.id, dist)
 
 
 func cut_branch(branch_id: int) -> bool:

@@ -38,10 +38,13 @@ func _ready() -> void:
 	panel.random_factor_changed.connect(_on_random_factor_changed)
 	panel.grow_step_pressed.connect(_on_grow_step_pressed)
 	panel.main_menu_pressed.connect(_go_main_menu)
+	panel.bark_mode_changed.connect(_on_bark_mode_changed)
+	panel.skeleton_guides_changed.connect(_on_skeleton_guides_changed)
 
 	_setup_prune_dialog()
 	renderer.branch_clicked.connect(_on_branch_clicked)
 
+	_sync_renderer_visual_options()
 	_apply_preset(0, true)
 
 
@@ -125,6 +128,28 @@ func _on_random_factor_changed(value: float) -> void:
 	if _pattern:
 		LabGrowthRandom.apply_to_pattern(_pattern, _random_factor)
 		_species.grow_pattern = _pattern
+
+
+func _on_bark_mode_changed(mode_index: int) -> void:
+	if renderer == null:
+		return
+	if mode_index == 1:
+		renderer.set_branch_mesh_mode(renderer.BranchMeshMode.TESSELLATION)
+	else:
+		renderer.set_branch_mesh_mode(renderer.BranchMeshMode.CYLINDERS)
+
+
+func _on_skeleton_guides_changed(enabled: bool) -> void:
+	if renderer:
+		renderer.set_show_skeleton_guides(enabled)
+
+
+func _sync_renderer_visual_options() -> void:
+	if renderer == null or panel == null:
+		return
+	var use_tessellation: bool = renderer.branch_mesh_mode == renderer.BranchMeshMode.TESSELLATION
+	panel.bark_mode_option.select(1 if use_tessellation else 0)
+	panel.skeleton_guides_toggle.button_pressed = renderer.show_skeleton_guides
 
 
 func _on_grow_step_pressed() -> void:
