@@ -10,3 +10,4 @@
 [node name="TreeRenderer" type="Node3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.22, 0)
 script = ExtResource("2")
+prune_hover_enabled = true

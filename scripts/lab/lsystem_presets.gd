@@ -3,12 +3,16 @@ extends RefCounted
 const GrowPatternScript = preload("res://scripts/tree/grow_pattern.gd")
 const CLASSIC_PATTERN := preload("res://resources/species/classic_upright_pattern.tres")
 const CASCADE_PATTERN := preload("res://resources/species/cascade_pattern.tres")
+const GINSENG_PATTERN := preload("res://resources/species/ginseng_ficus_pattern.tres")
+const JUNIPER_PATTERN := preload("res://resources/species/juniper_pattern.tres")
 
 
 static func get_names() -> Array[String]:
 	return [
 		"Classic Upright",
 		"Cascade",
+		"Ginseng Ficus",
+		"Juniper",
 		"Binary Tree",
 		"Bushy",
 		"Symmetric",
@@ -22,6 +26,10 @@ static func load_preset(index: int):
 		1:
 			return CASCADE_PATTERN.duplicate(true)
 		2:
+			return GINSENG_PATTERN.duplicate(true)
+		3:
+			return JUNIPER_PATTERN.duplicate(true)
+		4:
 			return _custom(
 				"T",
 				"T=F[+F][-F][&F]\nF=F",
@@ -32,7 +40,7 @@ static func load_preset(index: int):
 				4,
 				3
 			)
-		3:
+		5:
 			return _custom(
 				"T",
 				"T=F[+T][-T][\\T]\nF=F",
@@ -43,7 +51,7 @@ static func load_preset(index: int):
 				5,
 				3
 			)
-		4:
+		6:
 			return _custom(
 				"T",
 				"T=F[+S][-S][&S]\nS=F[+T][-T][^T]\nF=F",
@@ -77,12 +85,17 @@ static func _custom(
 	pattern.gravity_curve = gravity
 	pattern.max_branch_depth = max_depth
 	pattern.use_lsystem = true
-	pattern.trunk_thickness = 0.065
-	pattern.branch_thickness = 0.024
-	pattern.thickness_falloff = 0.72
+	pattern.deterministic_growth = true
+	pattern.angle_jitter_deg = 0.0
+	pattern.segment_length_jitter = 0.0
+	pattern.lateral_skip_chance = 0.0
+	pattern.growth_energy_variance = 0.0
+	pattern.lateral_roll_spread_deg = 0.0
+	pattern.spatial_spread_deg = 0.0
+	pattern.trunk_thickness = 0.023
+	pattern.branch_thickness = 0.009
+	pattern.thickness_falloff = 0.68
 	pattern.foliage_start_length = 0.05
 	pattern.foliage_growth_rate = 0.16
 	pattern.max_children_per_node = max_children
-	pattern.lateral_roll_spread_deg = 42.0
-	pattern.spatial_spread_deg = 16.0
 	return pattern

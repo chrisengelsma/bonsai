@@ -1,12 +1,14 @@
-[gd_resource type="Resource" script_class="GameCatalog" load_steps=5 format=3]
+[gd_resource type="Resource" script_class="GameCatalog" load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/catalog/game_catalog.gd" id="1"]
 [ext_resource type="Resource" path="res://resources/catalog/seed_classic_upright.tres" id="2"]
 [ext_resource type="Resource" path="res://resources/catalog/seed_cascade.tres" id="3"]
+[ext_resource type="Resource" path="res://resources/catalog/seed_ginseng_ficus.tres" id="5"]
+[ext_resource type="Resource" path="res://resources/catalog/seed_juniper.tres" id="6"]
 [ext_resource type="Resource" path="res://resources/soils/default_soil.tres" id="4"]
 
 [resource]
 script = ExtResource("1")
-seeds = [ExtResource("2"), ExtResource("3")]
+seeds = [ExtResource("2"), ExtResource("3"), ExtResource("5"), ExtResource("6")]
 soils = [ExtResource("4")]
 decorations = []

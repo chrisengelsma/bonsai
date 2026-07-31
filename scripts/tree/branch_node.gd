@@ -10,6 +10,9 @@ var age: float = 0.0
 var growth_energy: float = 1.0
 var foliage_amount: float = 0.0
 var is_growing_tip: bool = true
+var freeze_length: bool = false
+var prune_seed_pending: bool = false
+var prune_cut_radius: float = -1.0
 var is_graft: bool = false
 var graft_species_id: String = ""
 var cut_timestamp: float = -1.0
@@ -25,6 +28,8 @@ var locked_wobble: Array = []
 var ring_samples: Array = []
 var last_ring_sample_dist: float = 0.0
 var last_profile_direction: Vector3 = Vector3.UP
+var profile_frame_right: Vector3 = Vector3.ZERO
+var profile_joint_radius: float = -1.0
 
 
 func to_dict() -> Dictionary:
@@ -38,6 +43,9 @@ func to_dict() -> Dictionary:
 		"growth_energy": growth_energy,
 		"foliage_amount": foliage_amount,
 		"is_growing_tip": is_growing_tip,
+		"freeze_length": freeze_length,
+		"prune_seed_pending": prune_seed_pending,
+		"prune_cut_radius": prune_cut_radius,
 		"is_graft": is_graft,
 		"graft_species_id": graft_species_id,
 		"cut_timestamp": cut_timestamp,
@@ -53,6 +61,8 @@ func to_dict() -> Dictionary:
 		"ring_samples": _serialize_ring_samples(),
 		"last_ring_sample_dist": last_ring_sample_dist,
 		"last_profile_direction": [last_profile_direction.x, last_profile_direction.y, last_profile_direction.z],
+		"profile_frame_right": [profile_frame_right.x, profile_frame_right.y, profile_frame_right.z],
+		"profile_joint_radius": profile_joint_radius,
 	}
 
 
@@ -81,6 +91,9 @@ static func from_dict(data: Dictionary):
 	node.growth_energy = float(data.get("growth_energy", 1.0))
 	node.foliage_amount = float(data.get("foliage_amount", 0.0))
 	node.is_growing_tip = bool(data.get("is_growing_tip", true))
+	node.freeze_length = bool(data.get("freeze_length", false))
+	node.prune_seed_pending = bool(data.get("prune_seed_pending", false))
+	node.prune_cut_radius = float(data.get("prune_cut_radius", -1.0))
 	node.is_graft = bool(data.get("is_graft", false))
 	node.graft_species_id = str(data.get("graft_species_id", ""))
 	node.cut_timestamp = float(data.get("cut_timestamp", -1.0))
@@ -104,6 +117,13 @@ static func from_dict(data: Dictionary):
 		float(profile_dir[1]),
 		float(profile_dir[2])
 	).normalized()
+	var frame_right_data: Array = data.get("profile_frame_right", [0.0, 0.0, 0.0])
+	node.profile_frame_right = Vector3(
+		float(frame_right_data[0]),
+		float(frame_right_data[1]),
+		float(frame_right_data[2])
+	)
+	node.profile_joint_radius = float(data.get("profile_joint_radius", -1.0))
 	node.ring_samples = []
 	for sample_data in data.get("ring_samples", []):
 		if sample_data is Dictionary:

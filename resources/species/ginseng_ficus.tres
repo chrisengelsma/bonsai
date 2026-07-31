@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="TreeSpecies" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/catalog/tree_species.gd" id="1"]
+[ext_resource type="Resource" path="res://resources/species/ginseng_ficus_pattern.tres" id="2"]
+
+[resource]
+script = ExtResource("1")
+id = "ginseng_ficus"
+display_name = "Ginseng Ficus"
+grow_pattern = ExtResource("2")
+trunk_color = Color(0.62, 0.52, 0.42, 1)
+foliage_color = Color(0.28, 0.52, 0.3, 1)
+starter_graph = {}

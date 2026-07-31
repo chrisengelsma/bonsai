@@ -15,6 +15,9 @@ extends Resource
 @export var cambium_growth_rate: float = 0.0011
 @export var ring_sample_spacing: float = 0.028
 @export var use_lsystem: bool = true
+@export var deterministic_growth: bool = true
+@export var use_fork_bulb: bool = false
+@export var foliage_style: String = "none"
 
 @export var tip_growth_rate: float = 0.02
 @export var branch_angle_range: Vector2 = Vector2(25.0, 55.0)
@@ -28,8 +31,8 @@ extends Resource
 @export var gravity_curve: float = 0.0
 @export var regrowth_delay: float = 2.0
 @export var regrowth_chance: float = 0.4
-@export var trunk_thickness: float = 0.06
-@export var branch_thickness: float = 0.025
+@export var trunk_thickness: float = 0.022
+@export var branch_thickness: float = 0.009
 
 var _rules_cache: Dictionary = {}
 

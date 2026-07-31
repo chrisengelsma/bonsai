@@ -15,9 +15,9 @@ script = ExtResource("5")
 [node name="LabTree" parent="." instance=ExtResource("2")]
 
 [node name="OrbitCamera" parent="." instance=ExtResource("3")]
-min_distance = 1.2
-max_distance = 25.0
-distance = 5.0
+min_distance = 0.9
+max_distance = 18.0
+distance = 3.0
 zoom_sensitivity = 0.35
 target_path = NodePath("../LabTree")
 script = ExtResource("6")

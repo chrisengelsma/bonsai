@@ -1,42 +1,96 @@
 extends Node3D
 class_name TreeRenderer
 
-const BranchMeshBuilder = preload("res://scripts/tree/branch_mesh_builder.gd")
-
-signal branch_clicked(branch_id: int)
+signal branch_clicked(branch_id: int, hit_position: Vector3)
 
 @export var trunk_material: Material
-@export var foliage_material: StandardMaterial3D
 @export var graft_material: Material
 @export var cut_material: Material
 @export var radial_segments: int = 10
-@export var ring_count: int = 3
-@export var bark_variation: float = 0.11
-@export var thickness_visual_scale: float = 1.18
+@export var thickness_visual_scale: float = 1.0
+@export var prune_hover_enabled: bool = false
+@export var prune_ring_min_radius: float = 0.018
 
 var _graph
 var _species
 var _segment_pool: Dictionary = {}
-var _foliage_pool: Dictionary = {}
 var _cap_pool: Dictionary = {}
 var _graft_pool: Dictionary = {}
-var _collar_pool: Dictionary = {}
 var _pick_areas: Dictionary = {}
 var _segments_root: Node3D
-var _foliage_root: Node3D
 var _caps_root: Node3D
+var _hover_ring: MeshInstance3D
+var _click_start: Vector2 = Vector2.ZERO
+var _click_pending: bool = false
 
 
 func _ready() -> void:
 	_segments_root = Node3D.new()
 	_segments_root.name = "Segments"
 	add_child(_segments_root)
-	_foliage_root = Node3D.new()
-	_foliage_root.name = "Foliage"
-	add_child(_foliage_root)
 	_caps_root = Node3D.new()
 	_caps_root.name = "Caps"
 	add_child(_caps_root)
+	_hover_ring = _create_hover_ring()
+
+
+func _process(_delta: float) -> void:
+	if not prune_hover_enabled or _graph == null:
+		if _hover_ring:
+			_hover_ring.visible = false
+		return
+
+	var hit: Dictionary = _pick_branch_at_mouse()
+	if hit.is_empty():
+		_hover_ring.visible = false
+		return
+
+	_update_hover_ring(hit.branch_id, hit.position)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not prune_hover_enabled or _graph == null:
+		return
+	if handle_prune_input(event):
+		get_viewport().set_input_as_handled()
+
+
+func handle_prune_input(event: InputEvent) -> bool:
+	if not prune_hover_enabled or _graph == null:
+		return false
+
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_click_start = event.position
+			_click_pending = true
+			return false
+		if not _click_pending:
+			return false
+		_click_pending = false
+		if _click_start.distance_to(event.position) > 18.0:
+			return false
+		var hit: Dictionary = _pick_branch_at_mouse()
+		if hit.is_empty():
+			return false
+		_update_hover_ring(hit.branch_id, hit.position)
+		branch_clicked.emit(hit.branch_id, _prune_hit_on_branch(hit.branch_id, hit.position))
+		return true
+
+	if event is InputEventScreenTouch and event.pressed:
+		var hit: Dictionary = _pick_branch_at_mouse()
+		if hit.is_empty():
+			return false
+		_update_hover_ring(hit.branch_id, hit.position)
+		branch_clicked.emit(hit.branch_id, _prune_hit_on_branch(hit.branch_id, hit.position))
+		return true
+
+	return false
+
+
+func set_prune_hover_enabled(enabled: bool) -> void:
+	prune_hover_enabled = enabled
+	if not enabled and _hover_ring:
+		_hover_ring.visible = false
 
 
 func setup(graph, species) -> void:
@@ -52,63 +106,69 @@ func setup(graph, species) -> void:
 
 func _ensure_materials() -> void:
 	if trunk_material == null:
-		var bark_shader := load("res://shaders/bark.gdshader") as Shader
-		if bark_shader:
-			var bark_mat := ShaderMaterial.new()
-			bark_mat.shader = bark_shader
-			bark_mat.set_shader_parameter("bark_color", _species.trunk_color if _species else Color(0.55, 0.35, 0.2))
-			trunk_material = bark_mat
-		else:
-			trunk_material = StandardMaterial3D.new()
-			trunk_material.albedo_color = _species.trunk_color if _species else Color(0.55, 0.35, 0.2)
-			trunk_material.roughness = 0.94
-	if foliage_material == null:
-		foliage_material = StandardMaterial3D.new()
-		foliage_material.albedo_color = _species.foliage_color if _species else Color(0.42, 0.56, 0.44)
+		trunk_material = StandardMaterial3D.new()
+		trunk_material.albedo_color = _species.trunk_color if _species else Color(0.55, 0.35, 0.2)
+		trunk_material.roughness = 0.94
 	if graft_material == null:
 		graft_material = trunk_material.duplicate()
 		if graft_material is StandardMaterial3D:
 			graft_material.albedo_color = Color(0.79, 0.66, 0.42)
-		elif graft_material is ShaderMaterial:
-			graft_material.set_shader_parameter("bark_color", Color(0.79, 0.66, 0.42))
 	if cut_material == null:
 		cut_material = trunk_material.duplicate()
 		if cut_material is StandardMaterial3D:
 			cut_material.albedo_color = _species.trunk_color.lightened(0.2) if _species else Color(0.7, 0.55, 0.35)
-		elif cut_material is ShaderMaterial:
-			cut_material.set_shader_parameter("bark_color", _species.trunk_color.lightened(0.2) if _species else Color(0.7, 0.55, 0.35))
 
 
 func _apply_species_colors() -> void:
 	if _species == null:
 		return
-	if trunk_material is ShaderMaterial:
-		trunk_material.set_shader_parameter("bark_color", _species.trunk_color)
-	elif trunk_material is StandardMaterial3D:
+	if trunk_material is StandardMaterial3D:
 		trunk_material.albedo_color = _species.trunk_color
-	if foliage_material:
-		foliage_material.albedo_color = _species.foliage_color
 
 
 func rebuild() -> void:
 	if _graph == null:
 		return
+
+	var live_ids: Dictionary = {}
+	for node_id in _graph.nodes.keys():
+		live_ids[node_id] = true
+
 	_hide_all_pools()
+	_cleanup_stale_pools(live_ids)
+
 	for node_id in _graph.nodes.keys():
 		_render_branch(node_id)
+
+
+func _cleanup_stale_pools(live_ids: Dictionary) -> void:
+	for node_id in _segment_pool.keys():
+		if not live_ids.has(node_id):
+			_segment_pool[node_id].queue_free()
+			_segment_pool.erase(node_id)
+	for node_id in _cap_pool.keys():
+		if not live_ids.has(node_id):
+			_cap_pool[node_id].queue_free()
+			_cap_pool.erase(node_id)
+	for node_id in _graft_pool.keys():
+		if not live_ids.has(node_id):
+			_graft_pool[node_id].queue_free()
+			_graft_pool.erase(node_id)
+	for node_id in _pick_areas.keys():
+		if not live_ids.has(node_id):
+			var area: Area3D = _pick_areas[node_id]
+			if is_instance_valid(area):
+				area.queue_free()
+			_pick_areas.erase(node_id)
 
 
 func _hide_all_pools() -> void:
 	for key in _segment_pool.keys():
 		_segment_pool[key].visible = false
-	for key in _foliage_pool.keys():
-		_foliage_pool[key].visible = false
 	for key in _cap_pool.keys():
 		_cap_pool[key].visible = false
 	for key in _graft_pool.keys():
 		_graft_pool[key].visible = false
-	for key in _collar_pool.keys():
-		_collar_pool[key].visible = false
 
 
 func _render_branch(node_id: int) -> void:
@@ -116,101 +176,220 @@ func _render_branch(node_id: int) -> void:
 	if node.length <= 0.001:
 		return
 
-	_graph.ensure_profile_render_ready(node)
-
 	var start: Vector3 = _graph.get_joint(node_id)
-	var tip_offset: Vector3 = BranchMeshBuilder.get_profile_tip_offset(node.ring_samples)
-	if tip_offset.length_squared() <= 0.0001:
-		tip_offset = node.direction * node.length
-	var end: Vector3 = start + tip_offset
+	var end: Vector3 = _graph.get_world_tip(node_id)
+	var direction: Vector3 = (end - start).normalized()
+	var height: float = maxf(start.distance_to(end), 0.02)
 
 	var bottom_radius: float = _get_base_radius(node_id) * thickness_visual_scale
 	var top_radius: float = _get_tip_radius(node_id) * thickness_visual_scale
 
 	var mesh_instance := _get_segment(node_id)
 	mesh_instance.visible = true
-	var profile_mesh: ArrayMesh = BranchMeshBuilder.build_solid_branch(
-		node.ring_samples,
-		node.locked_wobble,
-		radial_segments,
-		node.length
-	)
-
-	if profile_mesh != null:
-		mesh_instance.mesh = profile_mesh
-		mesh_instance.position = start
-		mesh_instance.basis = Basis.IDENTITY
-	else:
-		var direction: Vector3 = (end - start).normalized()
-		var height: float = start.distance_to(end)
-		mesh_instance.mesh = BranchMeshBuilder.build_tapered_segment(
-			height,
-			bottom_radius,
-			top_radius,
-			radial_segments,
-			ring_count,
-			bark_variation,
-			node_id
-		)
-		mesh_instance.position = start + direction * (height * 0.5)
-		_orient_segment(mesh_instance, start, direction, height)
+	mesh_instance.mesh = _build_cylinder(height, bottom_radius, top_radius)
+	_orient_segment(mesh_instance, start, direction, height)
+	mesh_instance.material_override = graft_material if node.is_graft else trunk_material
 
 	if node.is_graft:
-		mesh_instance.material_override = graft_material
 		var graft_marker := _get_graft_marker(node_id)
 		graft_marker.visible = true
 		graft_marker.position = start
-	else:
-		mesh_instance.material_override = trunk_material
 
 	if node.cut_timestamp >= 0.0:
 		var cap := _get_cap(node_id)
 		cap.visible = true
-		cap.position = end
-		var direction: Vector3 = (end - start).normalized()
-		var height: float = maxf(start.distance_to(end), top_radius * 0.35)
-		cap.mesh = BranchMeshBuilder.build_tapered_segment(
+		cap.mesh = _build_cylinder(
 			top_radius * 0.35,
 			top_radius,
-			top_radius * 0.15,
-			maxi(6, radial_segments - 2),
-			1,
-			bark_variation * 0.5,
-			node_id + 9173
+			top_radius * 0.15
 		)
 		_orient_segment(cap, end - direction * (top_radius * 0.175), direction, top_radius * 0.35)
 		cap.material_override = cut_material
 
-	if node.foliage_amount > 0.05:
-		var foliage := _get_foliage(node_id)
-		foliage.visible = true
-		foliage.position = end
-		var foliage_scale: float = 0.05 + node.foliage_amount * 0.1
-		foliage.scale = Vector3.ONE * foliage_scale
-		if node.graft_species_id != "":
-			var mat := foliage_material.duplicate()
-			mat.albedo_color = mat.albedo_color.lerp(Color(0.5, 0.65, 0.5), 0.3)
-			foliage.material_override = mat
-		else:
-			foliage.material_override = foliage_material
-
 	_update_pick_area(node_id, start, end, node.thickness * thickness_visual_scale)
 
 
+func _build_cylinder(height: float, bottom_radius: float, top_radius: float) -> CylinderMesh:
+	var cylinder := CylinderMesh.new()
+	cylinder.height = maxf(height, 0.02)
+	cylinder.bottom_radius = maxf(bottom_radius, 0.003)
+	cylinder.top_radius = maxf(top_radius, 0.003)
+	cylinder.radial_segments = maxi(radial_segments, 6)
+	return cylinder
+
+
 func _get_base_radius(node_id: int) -> float:
-	var node = _graph.nodes[node_id]
-	return maxf(node.thickness, 0.008)
+	return _graph.get_radius_at_dist(node_id, 0.0)
 
 
 func _get_tip_radius(node_id: int) -> float:
 	var node = _graph.nodes[node_id]
-	if node.children.is_empty():
-		return node.thickness * 0.74
+	return _graph.get_radius_at_dist(node_id, node.length)
 
-	var largest_child: float = 0.0
-	for child_id in node.children:
-		largest_child = maxf(largest_child, _graph.nodes[child_id].thickness)
-	return maxf(node.thickness * 0.86, largest_child * 1.04)
+
+func _get_radius_at_along(node_id: int, along: float) -> float:
+	return _graph.get_radius_at_dist(node_id, along) * thickness_visual_scale
+
+
+func _create_hover_ring() -> MeshInstance3D:
+	var mesh_instance := MeshInstance3D.new()
+	mesh_instance.name = "PruneHoverRing"
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.95, 0.12, 0.08)
+	material.emission_enabled = true
+	material.emission = Color(0.85, 0.08, 0.05)
+	material.emission_energy_multiplier = 2.2
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	material.no_depth_test = true
+	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mesh_instance.material_override = material
+	mesh_instance.visible = false
+	add_child(mesh_instance)
+	return mesh_instance
+
+
+func _update_hover_ring(branch_id: int, local_hit: Vector3) -> void:
+	var start: Vector3 = _graph.get_joint(branch_id)
+	var end: Vector3 = _graph.get_world_tip(branch_id)
+	var branch_dir: Vector3 = (end - start).normalized()
+	var length: float = start.distance_to(end)
+	var along: float = clampf((local_hit - start).dot(branch_dir), 0.02, length)
+	var center: Vector3 = start + branch_dir * along
+	var branch_radius: float = _get_radius_at_along(branch_id, along)
+	var ring_radius: float = maxf(branch_radius * 1.5, prune_ring_min_radius)
+
+	var tube_radius: float = maxf(ring_radius * 0.08, 0.002)
+	var torus := TorusMesh.new()
+	torus.inner_radius = maxf(ring_radius - tube_radius, 0.001)
+	torus.outer_radius = ring_radius + tube_radius
+	torus.rings = 20
+	torus.ring_segments = maxi(radial_segments, 12)
+
+	_hover_ring.mesh = torus
+	_hover_ring.visible = true
+	_orient_ring(_hover_ring, center, branch_dir)
+
+
+func _prune_hit_on_branch(branch_id: int, local_hit: Vector3) -> Vector3:
+	var start: Vector3 = _graph.get_joint(branch_id)
+	var end: Vector3 = _graph.get_world_tip(branch_id)
+	var branch_dir: Vector3 = (end - start).normalized()
+	var length: float = start.distance_to(end)
+	var along: float = clampf((local_hit - start).dot(branch_dir), 0.02, length)
+	return start + branch_dir * along
+
+
+func _orient_ring(mesh_instance: MeshInstance3D, center: Vector3, branch_dir: Vector3) -> void:
+	branch_dir = branch_dir.normalized()
+	if branch_dir.length_squared() <= 0.0001:
+		return
+
+	mesh_instance.position = center
+
+	# TorusMesh lies in the XZ plane with its hole along local Y.
+	# Align local Y to the branch centerline so the ring is perpendicular to it.
+	var ref_up: Vector3 = Vector3.UP
+	if absf(branch_dir.dot(ref_up)) > 0.98:
+		ref_up = Vector3.FORWARD
+
+	var x_axis: Vector3 = ref_up.cross(branch_dir).normalized()
+	var z_axis: Vector3 = branch_dir.cross(x_axis).normalized()
+	mesh_instance.basis = Basis(x_axis, branch_dir, z_axis)
+
+
+func _pick_branch_at_mouse() -> Dictionary:
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if camera == null or _graph == null:
+		return {}
+
+	var mouse_pos: Vector2 = get_viewport().get_mouse_position()
+	var ray_origin_global: Vector3 = camera.project_ray_origin(mouse_pos)
+	var ray_dir_global: Vector3 = camera.project_ray_normal(mouse_pos)
+	var to_local: Transform3D = global_transform.affine_inverse()
+	var ray_origin: Vector3 = to_local * ray_origin_global
+	var ray_dir: Vector3 = (to_local.basis * ray_dir_global).normalized()
+
+	var best_t_ray: float = INF
+	var best_hit: Dictionary = {}
+
+	for node_id in _graph.nodes.keys():
+		var node = _graph.nodes[node_id]
+		if node.length <= 0.001:
+			continue
+
+		var start: Vector3 = _graph.get_joint(node_id)
+		var end: Vector3 = _graph.get_world_tip(node_id)
+		var pick_radius: float = maxf(
+			_get_base_radius(node_id),
+			_get_tip_radius(node_id)
+		) * thickness_visual_scale * 1.6
+		pick_radius = maxf(pick_radius, 0.02)
+
+		var segment_hit: Dictionary = _raycast_branch_segment(
+			ray_origin,
+			ray_dir,
+			start,
+			end,
+			pick_radius
+		)
+		if segment_hit.is_empty():
+			continue
+
+		var t_ray: float = segment_hit.t_ray
+		if t_ray < best_t_ray:
+			best_t_ray = t_ray
+			best_hit = {
+				"branch_id": node_id,
+				"position": segment_hit.position,
+			}
+
+	return best_hit
+
+
+func _raycast_branch_segment(
+	ray_origin: Vector3,
+	ray_dir: Vector3,
+	seg_start: Vector3,
+	seg_end: Vector3,
+	radius: float
+) -> Dictionary:
+	var axis: Vector3 = seg_end - seg_start
+	var axis_len: float = axis.length()
+	if axis_len <= 0.001:
+		return {}
+
+	var axis_dir: Vector3 = axis / axis_len
+	var w0: Vector3 = ray_origin - seg_start
+	var a: float = ray_dir.dot(ray_dir)
+	var b: float = ray_dir.dot(axis_dir)
+	var c: float = axis_dir.dot(axis_dir)
+	var d: float = ray_dir.dot(w0)
+	var e: float = axis_dir.dot(w0)
+	var denom: float = a * c - b * b
+
+	var t_ray: float
+	var t_axis: float
+	if absf(denom) < 0.0001:
+		t_ray = 0.0
+		t_axis = e / c
+	else:
+		t_ray = (b * e - c * d) / denom
+		t_axis = (a * e - b * d) / denom
+
+	if t_ray < 0.0:
+		return {}
+
+	t_axis = clampf(t_axis, 0.0, axis_len)
+	var point_on_ray: Vector3 = ray_origin + ray_dir * t_ray
+	var point_on_axis: Vector3 = seg_start + axis_dir * t_axis
+	if point_on_ray.distance_squared_to(point_on_axis) > radius * radius:
+		return {}
+
+	return {
+		"t_ray": t_ray,
+		"position": point_on_axis,
+	}
 
 
 func _orient_segment(mesh_instance: MeshInstance3D, start: Vector3, direction: Vector3, height: float) -> void:
@@ -221,17 +400,7 @@ func _orient_segment(mesh_instance: MeshInstance3D, start: Vector3, direction: V
 	if absf(direction.dot(up)) > 0.98:
 		up = Vector3.FORWARD
 	mesh_instance.basis = Basis.looking_at(direction, up)
-	mesh_instance.rotate_object_local(Vector3.RIGHT, PI * 0.5)
-
-
-func _orient_collar(mesh_instance: MeshInstance3D, direction: Vector3) -> void:
-	if direction.length_squared() <= 0.0001:
-		return
-	var up: Vector3 = Vector3.UP
-	if absf(direction.dot(up)) > 0.98:
-		up = Vector3.FORWARD
-	mesh_instance.basis = Basis.looking_at(direction, up)
-	mesh_instance.rotate_object_local(Vector3.RIGHT, PI * 0.5)
+	mesh_instance.rotate_object_local(Vector3.RIGHT, -PI * 0.5)
 
 
 func _get_segment(node_id: int) -> MeshInstance3D:
@@ -241,29 +410,6 @@ func _get_segment(node_id: int) -> MeshInstance3D:
 		_segments_root.add_child(mesh_instance)
 		_segment_pool[node_id] = mesh_instance
 	return _segment_pool[node_id]
-
-
-func _get_collar(node_id: int) -> MeshInstance3D:
-	if not _collar_pool.has(node_id):
-		var mesh_instance := MeshInstance3D.new()
-		mesh_instance.material_override = trunk_material
-		mesh_instance.name = "Collar_%d" % node_id
-		_segments_root.add_child(mesh_instance)
-		_collar_pool[node_id] = mesh_instance
-	return _collar_pool[node_id]
-
-
-func _get_foliage(node_id: int) -> MeshInstance3D:
-	if not _foliage_pool.has(node_id):
-		var mesh_instance := MeshInstance3D.new()
-		var sphere := SphereMesh.new()
-		sphere.radial_segments = 8
-		sphere.rings = 6
-		mesh_instance.mesh = sphere
-		mesh_instance.name = "Foliage_%d" % node_id
-		_foliage_root.add_child(mesh_instance)
-		_foliage_pool[node_id] = mesh_instance
-	return _foliage_pool[node_id]
 
 
 func _get_cap(node_id: int) -> MeshInstance3D:
@@ -297,6 +443,9 @@ func _update_pick_area(node_id: int, start: Vector3, end: Vector3, thickness: fl
 	else:
 		area = Area3D.new()
 		area.name = "Pick_%d" % node_id
+		area.input_ray_pickable = true
+		area.collision_layer = 1
+		area.collision_mask = 0
 		var collision := CollisionShape3D.new()
 		var shape := CapsuleShape3D.new()
 		collision.name = "Collision"
@@ -315,18 +464,29 @@ func _update_pick_area(node_id: int, start: Vector3, end: Vector3, thickness: fl
 		if absf(direction.dot(up)) > 0.98:
 			up = Vector3.FORWARD
 		area.basis = Basis.looking_at(direction, up)
-		area.rotate_object_local(Vector3.RIGHT, PI * 0.5)
+		area.rotate_object_local(Vector3.RIGHT, -PI * 0.5)
 	var collision_shape: CollisionShape3D = area.get_node("Collision")
 	var capsule: CapsuleShape3D = collision_shape.shape
 	capsule.radius = maxf(thickness, 0.02)
 	capsule.height = maxf(height, 0.04)
 
 
-func _on_branch_input_event(_camera: Node, event: InputEvent, _position: Vector3, _normal: Vector3, _shape_idx: int, branch_id: int) -> void:
+func _on_branch_input_event(
+	_camera: Node,
+	event: InputEvent,
+	event_position: Vector3,
+	_normal: Vector3,
+	_shape_idx: int,
+	branch_id: int
+) -> void:
+	if prune_hover_enabled:
+		return
+
+	var local_hit: Vector3 = global_transform.affine_inverse() * event_position
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		branch_clicked.emit(branch_id)
+		branch_clicked.emit(branch_id, local_hit)
 	if event is InputEventScreenTouch and event.pressed:
-		branch_clicked.emit(branch_id)
+		branch_clicked.emit(branch_id, local_hit)
 
 
 func play_happy_bounce() -> void:

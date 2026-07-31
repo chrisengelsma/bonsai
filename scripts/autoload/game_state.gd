@@ -22,9 +22,10 @@ var grow_speed_multiplier: float = 1.0
 var music_enabled: bool = true
 var ambience_enabled: bool = true
 var camera_yaw: float = 0.0
-var camera_pitch: float = -10.0
+var camera_pitch: float = 30.0
 var camera_distance: float = 3.0
 var tool_mode: int = 0
+var show_skeleton: bool = false
 
 var _is_watering: bool = false
 var _water_cooldown: float = 0.0
@@ -100,7 +101,7 @@ func load_from_save(data: Dictionary) -> void:
 	music_enabled = bool(data.get("music_enabled", true))
 	ambience_enabled = bool(data.get("ambience_enabled", true))
 	camera_yaw = float(data.get("camera_yaw", 0.0))
-	camera_pitch = float(data.get("camera_pitch", -10.0))
+	camera_pitch = float(data.get("camera_pitch", 30.0))
 	camera_distance = float(data.get("camera_distance", 3.0))
 	tool_mode = int(data.get("tool_mode", 0))
 
@@ -172,6 +173,11 @@ func complete_watering() -> void:
 	_water_cooldown = config.watering_cooldown_seconds
 	watering_finished.emit()
 	AudioManager.play_sfx("growth")
+
+
+func set_show_skeleton(enabled: bool) -> void:
+	show_skeleton = enabled
+	settings_changed.emit()
 
 
 func set_grow_speed_multiplier(value: float) -> void:

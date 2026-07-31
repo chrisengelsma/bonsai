@@ -7,6 +7,8 @@ signal preset_selected(index: int)
 signal apply_pressed(params: Dictionary)
 signal reset_tree_pressed
 signal grow_speed_changed(value: float)
+signal random_factor_changed(value: float)
+signal grow_step_pressed
 signal main_menu_pressed
 
 @onready var preset_option: OptionButton = %PresetOption
@@ -26,6 +28,9 @@ signal main_menu_pressed
 @onready var children_label: Label = %ChildrenLabel
 @onready var speed_slider: HSlider = %SpeedSlider
 @onready var speed_label: Label = %SpeedLabel
+@onready var random_slider: HSlider = %RandomSlider
+@onready var random_label: Label = %RandomLabel
+@onready var grow_step_button: Button = %GrowStepButton
 @onready var apply_button: Button = %ApplyButton
 @onready var reset_button: Button = %ResetButton
 @onready var main_button: Button = %MainButton
@@ -45,6 +50,8 @@ func _ready() -> void:
 	depth_slider.value_changed.connect(_on_depth_changed)
 	children_slider.value_changed.connect(_on_children_changed)
 	speed_slider.value_changed.connect(_on_speed_changed)
+	random_slider.value_changed.connect(_on_random_changed)
+	grow_step_button.pressed.connect(func(): grow_step_pressed.emit())
 	apply_button.pressed.connect(_emit_apply)
 	reset_button.pressed.connect(func(): reset_tree_pressed.emit())
 	main_button.pressed.connect(func(): main_menu_pressed.emit())
@@ -59,7 +66,7 @@ func _populate_presets() -> void:
 		preset_option.add_item(name)
 
 
-func sync_from_pattern(pattern, preset_index: int) -> void:
+func sync_from_pattern(pattern, preset_index: int, random_factor: float = 0.0) -> void:
 	_syncing = true
 	if preset_index >= 0 and preset_index < preset_option.item_count:
 		preset_option.select(preset_index)
@@ -71,8 +78,23 @@ func sync_from_pattern(pattern, preset_index: int) -> void:
 	gravity_slider.value = pattern.gravity_curve
 	depth_slider.value = pattern.max_branch_depth
 	children_slider.value = pattern.max_children_per_node
+	random_slider.value = random_factor
+	set_grow_step_enabled(false)
+	set_grow_step_growing(false)
 	_update_labels()
 	_syncing = false
+
+
+func set_grow_step_enabled(enabled: bool) -> void:
+	grow_step_button.disabled = not enabled
+
+
+func set_grow_step_growing(growing: bool) -> void:
+	if growing:
+		grow_step_button.disabled = true
+		grow_step_button.text = "Growing…"
+	else:
+		grow_step_button.text = "Grow Step"
 
 
 func _collect_params() -> Dictionary:
@@ -85,6 +107,7 @@ func _collect_params() -> Dictionary:
 		"gravity": gravity_slider.value,
 		"max_depth": int(depth_slider.value),
 		"max_children": int(children_slider.value),
+		"random_factor": random_slider.value,
 	}
 
 
@@ -127,6 +150,12 @@ func _on_speed_changed(value: float) -> void:
 	grow_speed_changed.emit(value)
 
 
+func _on_random_changed(value: float) -> void:
+	random_label.text = "Random factor: %.0f%%" % (value * 100.0)
+	if not _syncing:
+		random_factor_changed.emit(value)
+
+
 func _update_labels() -> void:
 	_on_angle_changed(angle_slider.value)
 	_on_segment_changed(segment_slider.value)
@@ -135,23 +164,35 @@ func _update_labels() -> void:
 	_on_depth_changed(depth_slider.value)
 	_on_children_changed(children_slider.value)
 	_on_speed_changed(speed_slider.value)
+	_on_random_changed(random_slider.value)
 
 
 func _apply_mobile_layout() -> void:
 	var insets: Dictionary = MobileUtils.get_safe_insets(get_viewport())
 	var viewport_size: Vector2 = get_viewport_rect().size
-	var panel_width: float = clampf(viewport_size.x - insets.left - insets.right - 24.0, 300.0, 440.0)
-	panel.custom_minimum_size.x = panel_width
-	offset_left = insets.left + 8.0
-	offset_top = insets.top + 8.0
-	offset_right = -(insets.right + 8.0)
-	offset_bottom = -(insets.bottom + 8.0)
+	var panel_width: float = clampf(
+		380.0,
+		300.0,
+		minf(440.0, viewport_size.x - insets.left - insets.right - 16.0)
+	)
+
+	panel.anchor_left = 0.0
+	panel.anchor_top = 0.0
+	panel.anchor_right = 0.0
+	panel.anchor_bottom = 1.0
+	panel.offset_left = insets.left
+	panel.offset_top = insets.top
+	panel.offset_right = panel_width
+	panel.offset_bottom = -insets.bottom
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 
 	if MobileUtils.is_mobile():
+		grow_step_button.custom_minimum_size.y = 48.0
 		apply_button.custom_minimum_size.y = 48.0
 		reset_button.custom_minimum_size.y = 48.0
 		main_button.custom_minimum_size.y = 48.0
 	else:
+		grow_step_button.custom_minimum_size = Vector2.ZERO
 		apply_button.custom_minimum_size = Vector2.ZERO
 		reset_button.custom_minimum_size = Vector2.ZERO
 		main_button.custom_minimum_size = Vector2.ZERO
