@@ -1,0 +1,30 @@
+[gd_resource type="Resource" script_class="GrowPattern" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/tree/grow_pattern.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+lsystem_axiom = "T"
+lsystem_rules_text = "# Cascade — mix yaw, pitch down (&), and pitch up (^)
+T=F[+S][&S][-^S]
+S=F[&S][^T][+T]
+F=F"
+lsystem_angle_deg = 32.0
+lsystem_segment_length = 0.09
+lateral_roll_spread_deg = 48.0
+spatial_spread_deg = 18.0
+use_lsystem = true
+tip_growth_rate = 0.026
+branch_angle_range = Vector2(35, 70)
+branch_split_chance = 0.0
+max_branch_depth = 6
+max_children_per_node = 3
+apical_dominance = 0.4
+thickness_falloff = 0.68
+foliage_start_length = 0.05
+foliage_growth_rate = 0.16
+gravity_curve = 0.9
+regrowth_delay = 2.5
+regrowth_chance = 0.45
+trunk_thickness = 0.065
+branch_thickness = 0.024

@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="GameConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/game_config.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+moisture_decay_per_second = 0.008
+moisture_water_boost = 0.45
+growth_threshold = 0.25
+offline_progress_cap_seconds = 300.0
+watering_cooldown_seconds = 2.0
+default_moisture = 0.5

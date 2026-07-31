@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="SoilType" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/catalog/soil_type.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "soil_default"
+display_name = "Classic Soil"
+category = "soil"
+unlock_type = "free"
+store_product_id = ""
+moisture_decay_mult = 1.0
+growth_mult = 1.0
+dry_color = Color(0.76, 0.62, 0.45, 1)
+wet_color = Color(0.42, 0.28, 0.18, 1)

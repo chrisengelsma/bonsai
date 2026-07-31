@@ -1,0 +1,27 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/environment/CozyEnvironment.tscn" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/lab/LabTree.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/OrbitCamera.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://ui/LSystemLabPanel.tscn" id="4"]
+[ext_resource type="Script" path="res://scripts/lab/lsystem_lab.gd" id="5"]
+[ext_resource type="Script" path="res://scripts/lab/lab_orbit_camera.gd" id="6"]
+
+[node name="LSystemLab" type="Node3D"]
+script = ExtResource("5")
+
+[node name="CozyEnvironment" parent="." instance=ExtResource("1")]
+
+[node name="LabTree" parent="." instance=ExtResource("2")]
+
+[node name="OrbitCamera" parent="." instance=ExtResource("3")]
+min_distance = 1.2
+max_distance = 25.0
+distance = 5.0
+zoom_sensitivity = 0.35
+target_path = NodePath("../LabTree")
+script = ExtResource("6")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="LSystemLabPanel" parent="UI" instance=ExtResource("4")]

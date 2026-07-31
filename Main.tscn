@@ -1,0 +1,27 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/environment/CozyEnvironment.tscn" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/bonsai/BonsaiTree.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/OrbitCamera.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://scenes/interactions/WateringCan.tscn" id="4"]
+[ext_resource type="PackedScene" path="res://ui/GameHUD.tscn" id="5"]
+[ext_resource type="PackedScene" path="res://ui/SettingsPanel.tscn" id="6"]
+[ext_resource type="Script" path="res://scripts/main.gd" id="7"]
+
+[node name="Main" type="Node3D"]
+script = ExtResource("7")
+
+[node name="CozyEnvironment" parent="." instance=ExtResource("1")]
+
+[node name="BonsaiTree" parent="." instance=ExtResource("2")]
+
+[node name="OrbitCamera" parent="." instance=ExtResource("3")]
+target_path = NodePath("../BonsaiTree")
+
+[node name="WateringController" parent="." instance=ExtResource("4")]
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="GameHUD" parent="UI" instance=ExtResource("5")]
+
+[node name="SettingsPanel" parent="UI" instance=ExtResource("6")]

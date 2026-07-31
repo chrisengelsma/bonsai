@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="GameCatalog" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/catalog/game_catalog.gd" id="1"]
+[ext_resource type="Resource" path="res://resources/catalog/seed_classic_upright.tres" id="2"]
+[ext_resource type="Resource" path="res://resources/catalog/seed_cascade.tres" id="3"]
+[ext_resource type="Resource" path="res://resources/soils/default_soil.tres" id="4"]
+
+[resource]
+script = ExtResource("1")
+seeds = [ExtResource("2"), ExtResource("3")]
+soils = [ExtResource("4")]
+decorations = []

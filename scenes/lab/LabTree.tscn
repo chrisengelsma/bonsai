@@ -1,0 +1,12 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/bonsai/Pot.tscn" id="1"]
+[ext_resource type="Script" path="res://scripts/tree/tree_renderer.gd" id="2"]
+
+[node name="LabTree" type="Node3D"]
+
+[node name="Pot" parent="." instance=ExtResource("1")]
+
+[node name="TreeRenderer" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.22, 0)
+script = ExtResource("2")

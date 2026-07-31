@@ -1,0 +1,30 @@
+[gd_resource type="Resource" script_class="GrowPattern" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/tree/grow_pattern.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+lsystem_axiom = "T"
+lsystem_rules_text = "# Informal upright — yaw, pitch, and roll for 3D structure
+T=F[+S][-S][&S]
+S=F[+T][-T][^T]
+F=F"
+lsystem_angle_deg = 28.0
+lsystem_segment_length = 0.1
+lateral_roll_spread_deg = 40.0
+spatial_spread_deg = 15.0
+use_lsystem = true
+tip_growth_rate = 0.03
+branch_angle_range = Vector2(25, 50)
+branch_split_chance = 0.0
+max_branch_depth = 5
+max_children_per_node = 3
+apical_dominance = 0.8
+thickness_falloff = 0.72
+foliage_start_length = 0.06
+foliage_growth_rate = 0.18
+gravity_curve = 0.15
+regrowth_delay = 2.0
+regrowth_chance = 0.5
+trunk_thickness = 0.07
+branch_thickness = 0.028
