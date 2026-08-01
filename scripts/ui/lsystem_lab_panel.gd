@@ -11,7 +11,8 @@ signal random_factor_changed(value: float)
 signal grow_step_pressed
 signal main_menu_pressed
 signal bark_mode_changed(mode_index: int)
-signal skeleton_guides_changed(enabled: bool)
+signal wood_wireframe_changed(enabled: bool)
+signal roots_visibility_changed(enabled: bool)
 
 @onready var preset_option: OptionButton = %PresetOption
 @onready var axiom_field: LineEdit = %AxiomField
@@ -33,7 +34,8 @@ signal skeleton_guides_changed(enabled: bool)
 @onready var random_slider: HSlider = %RandomSlider
 @onready var random_label: Label = %RandomLabel
 @onready var bark_mode_option: OptionButton = %BarkModeOption
-@onready var skeleton_guides_toggle: CheckButton = %SkeletonGuidesToggle
+@onready var wood_wireframe_toggle: CheckButton = %WoodWireframeToggle
+@onready var roots_toggle: CheckButton = %RootsToggle
 @onready var grow_step_button: Button = %GrowStepButton
 @onready var apply_button: Button = %ApplyButton
 @onready var reset_button: Button = %ResetButton
@@ -56,7 +58,8 @@ func _ready() -> void:
 	speed_slider.value_changed.connect(_on_speed_changed)
 	random_slider.value_changed.connect(_on_random_changed)
 	bark_mode_option.item_selected.connect(_on_bark_mode_selected)
-	skeleton_guides_toggle.toggled.connect(_on_skeleton_guides_toggled)
+	wood_wireframe_toggle.toggled.connect(_on_wood_wireframe_toggled)
+	roots_toggle.toggled.connect(_on_roots_toggled)
 	grow_step_button.pressed.connect(func(): grow_step_pressed.emit())
 	apply_button.pressed.connect(_emit_apply)
 	reset_button.pressed.connect(func(): reset_tree_pressed.emit())
@@ -168,10 +171,16 @@ func _on_bark_mode_selected(index: int) -> void:
 	bark_mode_changed.emit(index)
 
 
-func _on_skeleton_guides_toggled(enabled: bool) -> void:
+func _on_wood_wireframe_toggled(enabled: bool) -> void:
 	if _syncing:
 		return
-	skeleton_guides_changed.emit(enabled)
+	wood_wireframe_changed.emit(enabled)
+
+
+func _on_roots_toggled(enabled: bool) -> void:
+	if _syncing:
+		return
+	roots_visibility_changed.emit(enabled)
 
 
 func _update_labels() -> void:

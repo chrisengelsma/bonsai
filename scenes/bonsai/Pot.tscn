@@ -1,33 +1,31 @@
 [gd_scene load_steps=4 format=3]
 
-[ext_resource type="Script" path="res://scripts/pot_soil.gd" id="1"]
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pot"]
-albedo_color = Color(0.77, 0.55, 0.42, 1)
+[ext_resource type="Script" path="res://scripts/pot/pot.gd" id="1"]
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_pot"]
-top_radius = 0.22
-bottom_radius = 0.18
-height = 0.18
-radial_segments = 8
+top_radius = 1.32
+bottom_radius = 1.08
+height = 0.36
+radial_segments = 32
 
-[sub_resource type="CylinderMesh" id="CylinderMesh_soil"]
-top_radius = 0.18
-bottom_radius = 0.18
-height = 0.04
-radial_segments = 8
+[sub_resource type="SphereMesh" id="SphereMesh_rock"]
+radius = 0.115
+height = 0.23
+radial_segments = 16
+rings = 12
 
 [node name="Pot" type="Node3D"]
-
-[node name="PotMesh" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.09, 0)
-mesh = SubResource("CylinderMesh_pot")
-surface_material_override/0 = SubResource("StandardMaterial3D_pot")
-
-[node name="Soil" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, 0)
-mesh = SubResource("CylinderMesh_soil")
 script = ExtResource("1")
 
+[node name="PotMesh" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.18, 0)
+mesh = SubResource("CylinderMesh_pot")
+
+[node name="Rocks" type="Node3D" parent="."]
+
+[node name="Rock" type="MeshInstance3D" parent="Rocks"]
+transform = Transform3D(1.45, 0, 0.18, 0, 0.62, 0, -0.16, 0, 1.22, 0.12, 0.335, 0.05)
+mesh = SubResource("SphereMesh_rock")
+
 [node name="DecorationAnchor" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.22, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.36, 0)

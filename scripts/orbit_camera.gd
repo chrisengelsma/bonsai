@@ -11,6 +11,7 @@ var target: Node3D
 @export var min_distance: float = 1.8
 @export var max_distance: float = 4.5
 @export var orbit_sensitivity: float = 1.0
+@export var pan_sensitivity: float = 1.0
 @export var zoom_sensitivity: float = 0.15
 @export var inertia_decay: float = 8.0
 @export var touch_drag_threshold: float = 12.0
@@ -21,6 +22,7 @@ var target: Node3D
 var distance: float = 3.0
 var orbit_yaw: float = 0.0
 var orbit_pitch: float = 30.0
+var pan_offset: Vector3 = Vector3.ZERO
 
 var _dragging: bool = false
 var _last_pointer: Vector2 = Vector2.ZERO
@@ -34,6 +36,7 @@ var _camera: Camera3D
 var _is_mobile: bool = false
 
 const _DRAG_DEG_PER_PIXEL := 0.22
+const _PAN_WORLD_PER_PIXEL := 0.002
 
 
 func _ready() -> void:
@@ -74,7 +77,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_apply_zoom(zoom_sensitivity)
 
 	if event is InputEventMouseMotion and _dragging and _can_orbit():
-		_apply_pointer_drag(event.position)
+		_apply_pointer_drag(event.position, event.shift_pressed)
+
+	if event is InputEventPanGesture and _can_orbit():
+		_handle_pan_gesture(event)
 
 	if event is InputEventScreenTouch:
 		_handle_screen_touch(event)
@@ -149,12 +155,43 @@ func _screen_delta_to_orbit(screen_delta: Vector2) -> Vector2:
 	return Vector2(screen_delta.x * scale, screen_delta.y * scale)
 
 
-func _apply_pointer_drag(screen_pos: Vector2) -> void:
+func _apply_pointer_drag(screen_pos: Vector2, shift_pressed: bool = false) -> void:
 	var screen_delta: Vector2 = screen_pos - _last_pointer
-	var orbit_delta: Vector2 = _screen_delta_to_orbit(screen_delta)
-	_apply_orbit_delta(orbit_delta)
-	_spin_velocity = orbit_delta * 28.0
+	if _is_pan_mode(shift_pressed):
+		_apply_pan_delta(screen_delta)
+	else:
+		var orbit_delta: Vector2 = _screen_delta_to_orbit(screen_delta)
+		_apply_orbit_delta(orbit_delta)
+		_spin_velocity = orbit_delta * 28.0
 	_last_pointer = screen_pos
+
+
+func _handle_pan_gesture(event: InputEventPanGesture) -> void:
+	if _is_pan_mode(event.shift_pressed):
+		_apply_pan_delta(event.delta)
+	else:
+		var orbit_delta: Vector2 = _screen_delta_to_orbit(event.delta)
+		_apply_orbit_delta(orbit_delta)
+		_spin_velocity = Vector2.ZERO
+	get_viewport().set_input_as_handled()
+
+
+func _is_pan_mode(shift_pressed: bool = false) -> bool:
+	return shift_pressed or Input.is_key_pressed(KEY_SHIFT)
+
+
+func _apply_pan_delta(screen_delta: Vector2) -> void:
+	_spin_velocity = Vector2.ZERO
+	var scale: float = _PAN_WORLD_PER_PIXEL * pan_sensitivity * distance
+	var offset_dir: Vector3 = _spherical_offset(orbit_yaw, orbit_pitch, 1.0).normalized()
+	var right: Vector3 = Vector3.UP.cross(offset_dir)
+	if right.length_squared() < 0.0001:
+		right = Vector3.RIGHT
+	else:
+		right = right.normalized()
+	var cam_up: Vector3 = offset_dir.cross(right).normalized()
+	pan_offset -= right * screen_delta.x * scale
+	pan_offset += cam_up * screen_delta.y * scale
 
 
 func _apply_orbit_delta(delta: Vector2) -> void:
@@ -216,7 +253,7 @@ func _get_look_target() -> Vector3:
 	var target_pos := Vector3.ZERO
 	if target:
 		target_pos = target.global_position
-	return target_pos + Vector3(0.0, look_target_height, 0.0)
+	return target_pos + Vector3(0.0, look_target_height, 0.0) + pan_offset
 
 
 func _spherical_offset(yaw_deg: float, pitch_deg: float, radius: float) -> Vector3:

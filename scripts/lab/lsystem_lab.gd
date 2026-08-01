@@ -5,8 +5,11 @@ const TreeSpeciesScript = preload("res://scripts/catalog/tree_species.gd")
 const LSystemPresets = preload("res://scripts/lab/lsystem_presets.gd")
 const GrowthLimits = preload("res://scripts/tree/growth_limits.gd")
 const LabGrowthRandom = preload("res://scripts/lab/lab_growth_random.gd")
+const RootGraphScript = preload("res://scripts/roots/root_graph.gd")
 
 @onready var renderer: Node3D = $LabTree/TreeRenderer
+@onready var root_renderer = $LabTree/Pot/RootRenderer
+@onready var pot: Node3D = $LabTree/Pot
 @onready var panel: Control = $UI/LSystemLabPanel
 
 var _graph
@@ -22,6 +25,12 @@ var _step_tips: Dictionary = {}
 var _pending_prune_id: int = -1
 var _pending_hit: Vector3 = Vector3.ZERO
 var _prune_dialog: ConfirmationDialog
+var _root_graph
+var _root_growth_seconds: float = 0.0
+var _root_generation_seed: int = 0
+var _root_field
+var _root_anchor: Vector3 = Vector3.ZERO
+var _root_spawn_radius: float = 0.014
 
 
 func _ready() -> void:
@@ -39,7 +48,8 @@ func _ready() -> void:
 	panel.grow_step_pressed.connect(_on_grow_step_pressed)
 	panel.main_menu_pressed.connect(_go_main_menu)
 	panel.bark_mode_changed.connect(_on_bark_mode_changed)
-	panel.skeleton_guides_changed.connect(_on_skeleton_guides_changed)
+	panel.wood_wireframe_changed.connect(_on_wood_wireframe_changed)
+	panel.roots_visibility_changed.connect(_on_roots_visibility_changed)
 
 	_setup_prune_dialog()
 	renderer.branch_clicked.connect(_on_branch_clicked)
@@ -55,7 +65,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-	if not _auto_grow or _growth_frozen or _graph == null or _pattern == null:
+	if _growth_frozen:
+		return
+
+	_accumulate_root_growth_time(delta)
+
+	if not _auto_grow or _graph == null or _pattern == null:
 		return
 
 	_graph.grow(delta, _pattern, true, _grow_speed, 1.0)
@@ -133,23 +148,38 @@ func _on_random_factor_changed(value: float) -> void:
 func _on_bark_mode_changed(mode_index: int) -> void:
 	if renderer == null:
 		return
-	if mode_index == 1:
-		renderer.set_branch_mesh_mode(renderer.BranchMeshMode.TESSELLATION)
-	else:
-		renderer.set_branch_mesh_mode(renderer.BranchMeshMode.CYLINDERS)
+	match mode_index:
+		1:
+			renderer.set_branch_mesh_mode(renderer.BranchMeshMode.DECIMATED_CYLINDERS)
+		2:
+			renderer.set_branch_mesh_mode(renderer.BranchMeshMode.SWEPT_TUBE)
+		3:
+			renderer.set_branch_mesh_mode(renderer.BranchMeshMode.RING_LOFT)
+		_:
+			renderer.set_branch_mesh_mode(renderer.BranchMeshMode.CYLINDERS)
 
 
-func _on_skeleton_guides_changed(enabled: bool) -> void:
+func _on_wood_wireframe_changed(enabled: bool) -> void:
 	if renderer:
-		renderer.set_show_skeleton_guides(enabled)
+		renderer.set_show_wood_wireframe(enabled)
+
+
+func _on_roots_visibility_changed(enabled: bool) -> void:
+	if enabled:
+		_invoke_root_generation()
+	else:
+		_release_root_graph()
+		if root_renderer:
+			root_renderer.set_show_roots(false)
 
 
 func _sync_renderer_visual_options() -> void:
 	if renderer == null or panel == null:
 		return
-	var use_tessellation: bool = renderer.branch_mesh_mode == renderer.BranchMeshMode.TESSELLATION
-	panel.bark_mode_option.select(1 if use_tessellation else 0)
-	panel.skeleton_guides_toggle.button_pressed = renderer.show_skeleton_guides
+	panel.bark_mode_option.select(renderer.branch_mesh_mode)
+	panel.wood_wireframe_toggle.button_pressed = renderer.show_wood_wireframe
+	if panel.roots_toggle != null:
+		panel.roots_toggle.button_pressed = root_renderer.show_roots if root_renderer else true
 
 
 func _on_grow_step_pressed() -> void:
@@ -252,7 +282,78 @@ func _reset_tree() -> void:
 	_graph.create_from_species(_species)
 	_graph.get_rng().randomize()
 	renderer.setup(_graph, _species)
+	_configure_roots()
 	_start_full_growth()
+
+
+func _configure_roots() -> void:
+	if root_renderer == null or pot == null:
+		return
+
+	_sync_tree_anchor()
+	_release_root_graph()
+
+	_root_growth_seconds = 0.0
+	_root_generation_seed = int(hash("lab_roots"))
+	_root_anchor = pot.get_root_anchor()
+	_root_spawn_radius = _get_root_spawn_radius()
+	if pot.has_method("get_growth_field"):
+		_root_field = pot.get_growth_field()
+	elif pot.has_method("get_bounds"):
+		_root_field = pot.get_bounds()
+	else:
+		_root_field = null
+
+	root_renderer.setup(null)
+	if panel != null and panel.roots_toggle.button_pressed:
+		_invoke_root_generation()
+	else:
+		root_renderer.set_show_roots(false)
+
+
+func _accumulate_root_growth_time(delta: float) -> void:
+	_root_growth_seconds += delta * _grow_speed * RootGraphScript.TREE_SPEED_RATIO
+
+
+func _invoke_root_generation() -> void:
+	if _root_field == null or root_renderer == null:
+		return
+
+	_release_root_graph()
+
+	_root_graph = RootGraphScript.new()
+	_root_graph.setup(_root_field, _root_anchor, _root_spawn_radius, _root_generation_seed)
+	_root_graph.generate_for_elapsed(_root_growth_seconds, 1.0)
+
+	root_renderer.setup(_root_graph)
+	root_renderer.set_show_roots(true)
+
+
+func _release_root_graph() -> void:
+	if _root_graph != null and root_renderer != null:
+		root_renderer.setup(null)
+	_root_graph = null
+
+
+func _apply_roots_visibility() -> void:
+	if panel != null and panel.roots_toggle.button_pressed:
+		_invoke_root_generation()
+	else:
+		_release_root_graph()
+		if root_renderer:
+			root_renderer.set_show_roots(false)
+
+
+func _get_root_spawn_radius() -> float:
+	if _graph and _graph.has_method("get_trunk_base_spawn_radius"):
+		return _graph.get_trunk_base_spawn_radius()
+	return 0.014
+
+
+func _sync_tree_anchor() -> void:
+	if renderer == null or pot == null or not pot.has_method("get_tree_anchor_height"):
+		return
+	renderer.position.y = pot.get_tree_anchor_height()
 
 
 func _on_graph_changed() -> void:

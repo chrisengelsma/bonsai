@@ -67,7 +67,15 @@ func _create_default_starter(species) -> void:
 		var root_spin: float = _rng.randf_range(0.0, TAU)
 		root.turtle_up = Vector3.FORWARD.rotated(Vector3.UP, root_spin).normalized()
 	root.growth_energy = _roll_growth_energy(pattern)
+	root.stochastic_direction = not pattern.deterministic_growth
 	root_id = root.id
+
+
+func get_trunk_base_spawn_radius() -> float:
+	if not nodes.has(root_id):
+		return 0.014
+	var root = nodes[root_id]
+	return clampf(root.thickness * 1.75, 0.008, 0.05)
 
 
 func _create_node(parent_id: int, direction: Vector3, thickness: float, depth: int):
@@ -116,7 +124,7 @@ func grow(delta: float, pattern, moisture_ok: bool, speed_mult: float, soil_mult
 		var growth_amount: float = pattern.tip_growth_rate * delta * speed_mult * soil_mult * tip.growth_energy
 		tip.length = minf(tip.length + growth_amount, max_length)
 
-		if pattern.gravity_curve != 0.0:
+		if pattern.gravity_curve != 0.0 and tip.stochastic_direction:
 			var gravity = Vector3(0.0, -pattern.gravity_curve * delta, 0.0)
 			tip.direction = (tip.direction + gravity).normalized()
 
@@ -187,7 +195,8 @@ func bud_lsystem_child(
 	direction: Vector3,
 	lsymbol: String,
 	pattern,
-	turtle_up: Vector3 = Vector3.FORWARD
+	turtle_up: Vector3 = Vector3.FORWARD,
+	stochastic_direction: bool = true
 ):
 	var parent = nodes[parent_id]
 	if not _allow_prune_spawn and not GrowthLimits.can_add_node(nodes.size()):
@@ -209,9 +218,64 @@ func bud_lsystem_child(
 	child.length_at_last_production = child.length
 	child.turtle_up = turtle_up.normalized()
 	child.growth_energy = _roll_growth_energy(pattern)
+	child.stochastic_direction = stochastic_direction
 	parent.is_growing_tip = false
 	_setup_child_joint_profile(parent, child)
 	return child
+
+
+func continue_growth_segment(
+	parent_id: int,
+	direction: Vector3,
+	turtle_up: Vector3,
+	lsymbol: String,
+	pattern
+) -> void:
+	if not nodes.has(parent_id):
+		return
+	if not GrowthLimits.can_add_node(nodes.size()):
+		return
+
+	var parent = nodes[parent_id]
+	parent.is_growing_tip = false
+	parent.freeze_length = true
+	_extend_tip_sample(parent)
+
+	var thickness: float = _parent_tip_radius(parent_id)
+	var child = _create_node(parent_id, direction, thickness, parent.depth)
+	child.base_thickness = thickness
+	child.length = maxf(pattern.lsystem_segment_length * 0.32, 0.042)
+	child.is_growing_tip = true
+	child.lsymbol = lsymbol
+	child.length_at_last_production = child.length
+	child.turtle_up = turtle_up.normalized()
+	child.growth_energy = _roll_growth_energy(pattern)
+	child.stochastic_direction = parent.stochastic_direction
+	_setup_axial_continuation_profile(parent, child)
+
+
+func _setup_axial_continuation_profile(parent, child) -> void:
+	ensure_profile_render_ready(parent)
+	_update_parent_fork_profile(parent)
+
+	var child_dir: Vector3 = child.direction.normalized()
+	child.profile_frame_right = Vector3.ZERO
+	child.profile_joint_radius = get_radius_at_dist(parent.id, parent.length)
+	child.locked_wobble = parent.locked_wobble.duplicate()
+	child.last_profile_direction = child_dir
+	child.last_ring_sample_dist = 0.0
+
+	var tip_dist: float = maxf(child.length, 0.02)
+	child.ring_samples = [
+		{
+			"dist": 0.0,
+			"dir": child_dir,
+		},
+		{
+			"dist": tip_dist,
+			"dir": child_dir,
+		},
+	]
 
 
 func _bud_child_random(parent_id: int, pattern) -> bool:
@@ -227,7 +291,11 @@ func _bud_child_random(parent_id: int, pattern) -> bool:
 
 
 func _init_branch_profile(node) -> void:
-	if not node.ring_samples.is_empty() and not node.locked_wobble.is_empty():
+	if not node.ring_samples.is_empty():
+		if node.last_profile_direction.length_squared() <= 0.0001:
+			node.last_profile_direction = node.direction.normalized()
+		if node.base_thickness <= 0.0:
+			node.base_thickness = node.thickness
 		return
 
 	node.base_thickness = node.thickness
@@ -451,12 +519,18 @@ func _extend_tip_sample(node) -> void:
 	var tip_dist: float = maxf(node.length, 0.02)
 	var last_sample: Dictionary = node.ring_samples[-1]
 	var last_dist: float = float(last_sample.get("dist", 0.0))
-	var last_dir: Vector3 = last_sample.get("dir", Vector3.UP)
+	var tip_dir: Vector3 = node.last_profile_direction
+	if tip_dir.length_squared() <= 0.0001:
+		tip_dir = node.direction
+	tip_dir = tip_dir.normalized()
+	if node.direction.length_squared() > 0.0001:
+		tip_dir = node.direction.normalized()
 
-	if absf(last_dist - tip_dist) < 0.001 and last_dir.angle_to(node.last_profile_direction) < deg_to_rad(0.5):
+	if absf(last_dist - tip_dist) < 0.001 and last_sample.get("dir", Vector3.UP).angle_to(tip_dir) < deg_to_rad(0.5):
 		return
 
-	_append_frozen_sample(node, tip_dist, node.last_profile_direction)
+	_append_frozen_sample(node, tip_dist, tip_dir)
+	node.last_profile_direction = tip_dir
 
 
 func _update_branch_profile(node, pattern) -> void:
@@ -479,7 +553,7 @@ func _update_branch_profile(node, pattern) -> void:
 
 
 func ensure_profile_render_ready(node) -> void:
-	if node.ring_samples.is_empty() or node.locked_wobble.is_empty():
+	if node.ring_samples.is_empty():
 		_init_branch_profile(node)
 	elif node.ring_samples.size() < 2:
 		_append_frozen_sample(node, maxf(node.length, 0.02), node.last_profile_direction)
@@ -739,7 +813,7 @@ func _bud_prune_fallback(parent_id: int, pattern) -> int:
 		if parent.children.size() >= pattern.max_children_per_node:
 			break
 		var dir: Vector3 = parent.direction.rotated(axis, angle_rad * sign).normalized()
-		if bud_lsystem_child(parent_id, dir, symbol, pattern, parent.turtle_up) != null:
+		if bud_lsystem_child(parent_id, dir, symbol, pattern, parent.turtle_up, false) != null:
 			spawned += 1
 	return spawned
 
@@ -772,7 +846,7 @@ func advance_lab_step(pattern, speed_mult: float = 1.0) -> void:
 		var growth_needed: float = maxf(segment_length - since_production, segment_length * 0.25)
 		tip.length = minf(tip.length + growth_needed * speed_mult, max_length)
 
-		if pattern.gravity_curve != 0.0:
+		if pattern.gravity_curve != 0.0 and tip.stochastic_direction:
 			var gravity := Vector3(0.0, -pattern.gravity_curve * 0.05, 0.0)
 			tip.direction = (tip.direction + gravity).normalized()
 
@@ -973,7 +1047,7 @@ func _segment_length_for_tip(tip, pattern) -> float:
 		return tip.next_segment_length
 
 	var base_length: float = pattern.lsystem_segment_length if pattern.use_lsystem else pattern.foliage_start_length * 2.0
-	if not pattern.deterministic_growth and pattern.segment_length_jitter > 0.0:
+	if tip.stochastic_direction and not pattern.deterministic_growth and pattern.segment_length_jitter > 0.0:
 		var spread: float = pattern.segment_length_jitter
 		base_length *= _rng.randf_range(1.0 - spread, 1.0 + spread)
 

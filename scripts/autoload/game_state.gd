@@ -14,6 +14,8 @@ signal watering_finished
 signal species_changed(species)
 signal settings_changed
 
+signal roots_visibility_changed(enabled: bool)
+
 var config
 var species
 var tree_graph
@@ -26,6 +28,7 @@ var camera_pitch: float = 30.0
 var camera_distance: float = 3.0
 var tool_mode: int = 0
 var show_skeleton: bool = false
+var show_roots: bool = true
 
 var _is_watering: bool = false
 var _water_cooldown: float = 0.0
@@ -100,6 +103,7 @@ func load_from_save(data: Dictionary) -> void:
 	grow_speed_multiplier = float(data.get("grow_speed_multiplier", 1.0))
 	music_enabled = bool(data.get("music_enabled", true))
 	ambience_enabled = bool(data.get("ambience_enabled", true))
+	show_roots = bool(data.get("show_roots", true))
 	camera_yaw = float(data.get("camera_yaw", 0.0))
 	camera_pitch = float(data.get("camera_pitch", 30.0))
 	camera_distance = float(data.get("camera_distance", 3.0))
@@ -151,6 +155,7 @@ func build_save_data() -> Dictionary:
 		"placed_decorations": [],
 		"music_enabled": music_enabled,
 		"ambience_enabled": ambience_enabled,
+		"show_roots": show_roots,
 		"camera_yaw": camera_yaw,
 		"camera_pitch": camera_pitch,
 		"camera_distance": camera_distance,
@@ -177,6 +182,14 @@ func complete_watering() -> void:
 
 func set_show_skeleton(enabled: bool) -> void:
 	show_skeleton = enabled
+	settings_changed.emit()
+
+
+func set_show_roots(enabled: bool) -> void:
+	if show_roots == enabled:
+		return
+	show_roots = enabled
+	roots_visibility_changed.emit(enabled)
 	settings_changed.emit()
 
 

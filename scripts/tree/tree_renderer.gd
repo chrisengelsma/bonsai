@@ -5,7 +5,7 @@ signal branch_clicked(branch_id: int, hit_position: Vector3)
 
 const BranchMeshBuilder = preload("res://scripts/tree/branch_mesh_builder.gd")
 
-enum BranchMeshMode { CYLINDERS, TESSELLATION }
+enum BranchMeshMode { CYLINDERS, DECIMATED_CYLINDERS, SWEPT_TUBE, RING_LOFT }
 
 @export var trunk_material: Material
 @export var graft_material: Material
@@ -15,22 +15,27 @@ enum BranchMeshMode { CYLINDERS, TESSELLATION }
 @export var prune_hover_enabled: bool = false
 @export var prune_ring_min_radius: float = 0.018
 @export var branch_mesh_mode: BranchMeshMode = BranchMeshMode.CYLINDERS
-@export var show_skeleton_guides: bool = false
+@export var show_wood_wireframe: bool = false
 @export var guide_ring_spacing: float = 0.045
+@export var segment_jitter: float = 0.07
+@export var corner_blend_bend_deg: float = 5.0
 @export var bark_variation: float = 0.09
 
 var _graph
 var _species
 var _segment_pool: Dictionary = {}
+var _chain_pool: Dictionary = {}
+var _blend_pool: Dictionary = {}
 var _cap_pool: Dictionary = {}
 var _graft_pool: Dictionary = {}
-var _guide_pool: Dictionary = {}
+var _wireframe_pool: Dictionary = {}
+var _hub_pool: Dictionary = {}
 var _pick_areas: Dictionary = {}
 var _segments_root: Node3D
 var _caps_root: Node3D
-var _guides_root: Node3D
+var _wireframe_root: Node3D
 var _hover_ring: MeshInstance3D
-var _guide_material: StandardMaterial3D
+var _wireframe_material: StandardMaterial3D
 var _click_start: Vector2 = Vector2.ZERO
 var _click_pending: bool = false
 
@@ -42,15 +47,17 @@ func _ready() -> void:
 	_caps_root = Node3D.new()
 	_caps_root.name = "Caps"
 	add_child(_caps_root)
-	_guides_root = Node3D.new()
-	_guides_root.name = "SkeletonGuides"
-	add_child(_guides_root)
+	_wireframe_root = Node3D.new()
+	_wireframe_root.name = "WoodWireframe"
+	add_child(_wireframe_root)
 	_hover_ring = _create_hover_ring()
-	_guide_material = StandardMaterial3D.new()
-	_guide_material.albedo_color = Color(0.95, 0.72, 0.2, 0.85)
-	_guide_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_guide_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_guide_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_wireframe_material = StandardMaterial3D.new()
+	_wireframe_material.albedo_color = Color(1.0, 1.0, 1.0, 0.95)
+	_wireframe_material.emission_enabled = true
+	_wireframe_material.emission = Color(1.0, 1.0, 1.0)
+	_wireframe_material.emission_energy_multiplier = 0.6
+	_wireframe_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_wireframe_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 
 func _process(_delta: float) -> void:
@@ -119,10 +126,10 @@ func set_branch_mesh_mode(mode: BranchMeshMode) -> void:
 	rebuild()
 
 
-func set_show_skeleton_guides(enabled: bool) -> void:
-	if show_skeleton_guides == enabled:
+func set_show_wood_wireframe(enabled: bool) -> void:
+	if show_wood_wireframe == enabled:
 		return
-	show_skeleton_guides = enabled
+	show_wood_wireframe = enabled
 	rebuild()
 
 
@@ -163,7 +170,9 @@ func rebuild() -> void:
 	if _graph == null:
 		return
 
-	if branch_mesh_mode == BranchMeshMode.TESSELLATION:
+	_clear_wireframes()
+
+	if _uses_profile_guides():
 		_graph.prepare_all_profiles_for_render()
 
 	var live_ids: Dictionary = {}
@@ -176,12 +185,37 @@ func rebuild() -> void:
 	for node_id in _graph.nodes.keys():
 		_render_branch(node_id)
 
+	if _uses_fork_hubs():
+		for node_id in _graph.nodes.keys():
+			var node = _graph.nodes[node_id]
+			if not node.children.is_empty():
+				_render_fork_hub(node_id)
+
 
 func _cleanup_stale_pools(live_ids: Dictionary) -> void:
 	for node_id in _segment_pool.keys():
 		if not live_ids.has(node_id):
 			_segment_pool[node_id].queue_free()
 			_segment_pool.erase(node_id)
+	for chain_key in _chain_pool.keys():
+		var chain_node_id: int = int(chain_key.split(":")[0])
+		if not live_ids.has(chain_node_id):
+			_chain_pool[chain_key].queue_free()
+			_chain_pool.erase(chain_key)
+	for blend_key in _blend_pool.keys():
+		var blend_node_id: int = int(blend_key.split(":")[0])
+		if not live_ids.has(blend_node_id):
+			_blend_pool[blend_key].queue_free()
+			_blend_pool.erase(blend_key)
+	for wire_key in _wireframe_pool.keys():
+		var wire_node_id: int = int(str(wire_key).split(":")[0])
+		if not live_ids.has(wire_node_id):
+			_wireframe_pool[wire_key].queue_free()
+			_wireframe_pool.erase(wire_key)
+	for node_id in _hub_pool.keys():
+		if not live_ids.has(node_id):
+			_hub_pool[node_id].queue_free()
+			_hub_pool.erase(node_id)
 	for node_id in _cap_pool.keys():
 		if not live_ids.has(node_id):
 			_cap_pool[node_id].queue_free()
@@ -201,26 +235,36 @@ func _cleanup_stale_pools(live_ids: Dictionary) -> void:
 func _hide_all_pools() -> void:
 	for key in _segment_pool.keys():
 		_segment_pool[key].visible = false
+	for key in _chain_pool.keys():
+		_chain_pool[key].visible = false
+	for key in _blend_pool.keys():
+		_blend_pool[key].visible = false
+	for key in _wireframe_pool.keys():
+		_wireframe_pool[key].visible = false
+	for key in _hub_pool.keys():
+		_hub_pool[key].visible = false
 	for key in _cap_pool.keys():
 		_cap_pool[key].visible = false
 	for key in _graft_pool.keys():
 		_graft_pool[key].visible = false
-	_clear_guides()
 
 
-func _clear_guides() -> void:
-	for key in _guide_pool.keys():
-		var guide: MeshInstance3D = _guide_pool[key]
-		if is_instance_valid(guide):
-			guide.queue_free()
-	_guide_pool.clear()
+func _clear_wireframes() -> void:
+	for key in _wireframe_pool.keys():
+		var mesh_instance: MeshInstance3D = _wireframe_pool[key]
+		if is_instance_valid(mesh_instance):
+			mesh_instance.queue_free()
+	_wireframe_pool.clear()
 
 
 func _render_branch(node_id: int) -> void:
-	if branch_mesh_mode == BranchMeshMode.TESSELLATION:
-		_render_branch_tessellated(node_id)
-	else:
-		_render_branch_cylinder(node_id)
+	match branch_mesh_mode:
+		BranchMeshMode.DECIMATED_CYLINDERS:
+			_render_branch_decimated(node_id)
+		BranchMeshMode.SWEPT_TUBE, BranchMeshMode.RING_LOFT:
+			_render_branch_skinned(node_id)
+		_:
+			_render_branch_cylinder(node_id)
 
 
 func _render_branch_cylinder(node_id: int) -> void:
@@ -248,20 +292,17 @@ func _render_branch_cylinder(node_id: int) -> void:
 		graft_marker.position = start
 
 	if node.cut_timestamp >= 0.0:
-		var cap := _get_cap(node_id)
-		cap.visible = true
-		cap.mesh = _build_cylinder(
-			top_radius * 0.35,
-			top_radius,
-			top_radius * 0.15
-		)
-		_orient_segment(cap, end - direction * (top_radius * 0.175), direction, top_radius * 0.35)
-		cap.material_override = cut_material
+		_render_cut_cap(node_id, end, direction)
+	else:
+		_render_tip_disc_cap(node_id, end, direction)
 
 	_update_pick_area(node_id, start, end, node.thickness * thickness_visual_scale)
+	if show_wood_wireframe:
+		_render_wireframe_cylinder(node_id, start, direction, height, bottom_radius, top_radius)
+	_prune_wireframe_pool(node_id, 0, 0, true)
 
 
-func _render_branch_tessellated(node_id: int) -> void:
+func _render_branch_decimated(node_id: int) -> void:
 	var node = _graph.nodes[node_id]
 	if node.length <= 0.001:
 		return
@@ -271,54 +312,339 @@ func _render_branch_tessellated(node_id: int) -> void:
 	var direction: Vector3 = (end - start).normalized()
 	var height: float = maxf(start.distance_to(end), 0.02)
 
-	var guide_samples: Array = _graph.get_bark_guide_samples(node_id, guide_ring_spacing)
+	var guide_samples: Array = _scale_sample_radii(
+		_graph.get_bark_guide_samples(node_id, guide_ring_spacing)
+	)
 	if guide_samples.size() < 2:
 		_render_branch_cylinder(node_id)
 		return
 
-	var scaled_samples: Array = _scale_sample_radii(guide_samples)
-	var wobble: Array = _ensure_branch_wobble(node)
-	var profile_mesh: ArrayMesh = BranchMeshBuilder.build_solid_branch(
-		scaled_samples,
-		wobble,
-		radial_segments,
-		node.length
+	var cylinder_specs: Array = BranchMeshBuilder.build_decimated_cylinder_specs(
+		guide_samples,
+		start,
+		node.id,
+		segment_jitter,
+		direction
+	)
+	var blend_specs: Array = BranchMeshBuilder.build_corner_blend_specs(
+		guide_samples,
+		start,
+		node.id,
+		corner_blend_bend_deg,
+		segment_jitter,
+		not node.children.is_empty(),
+		direction
 	)
 
-	var mesh_instance := _get_segment(node_id)
-	mesh_instance.visible = true
-	if profile_mesh != null:
-		mesh_instance.mesh = profile_mesh
-		mesh_instance.position = start
-		mesh_instance.basis = Basis.IDENTITY
-	else:
-		var bottom_radius: float = _get_base_radius(node_id) * thickness_visual_scale
-		var top_radius: float = _get_tip_radius(node_id) * thickness_visual_scale
-		mesh_instance.mesh = _build_cylinder(height, bottom_radius, top_radius)
-		_orient_segment(mesh_instance, start, direction, height)
-	mesh_instance.material_override = graft_material if node.is_graft else trunk_material
+	var material: Material = graft_material if node.is_graft else trunk_material
+	for i in range(cylinder_specs.size()):
+		var spec: Dictionary = cylinder_specs[i]
+		var chain_key: String = "%d:c:%d" % [node_id, i]
+		var mesh_instance := _get_chain_segment(chain_key)
+		mesh_instance.visible = true
+		var seg_start: Vector3 = spec.get("start", start)
+		var seg_end: Vector3 = spec.get("end", end)
+		var seg_dir: Vector3 = (seg_end - seg_start).normalized()
+		var seg_height: float = seg_start.distance_to(seg_end)
+		mesh_instance.mesh = _build_cylinder(
+			seg_height,
+			float(spec.get("bottom_r", 0.01)) * thickness_visual_scale,
+			float(spec.get("top_r", 0.01)) * thickness_visual_scale
+		)
+		_orient_segment(mesh_instance, seg_start, seg_dir, seg_height)
+		mesh_instance.material_override = material
 
-	if show_skeleton_guides:
-		_render_skeleton_guides(node_id, start, scaled_samples)
+	for i in range(blend_specs.size()):
+		var spec: Dictionary = blend_specs[i]
+		var blend_key: String = "%d:b:%d" % [node_id, i]
+		var blend_mesh := _get_blend_sphere(blend_key)
+		blend_mesh.visible = true
+		var radius: float = float(spec.get("radius", 0.01)) * thickness_visual_scale
+		var sphere := SphereMesh.new()
+		sphere.radius = maxf(radius, 0.003)
+		sphere.height = radius * 2.0
+		sphere.radial_segments = maxi(radial_segments, 8)
+		sphere.rings = maxi(radial_segments / 2, 6)
+		blend_mesh.mesh = sphere
+		blend_mesh.position = spec.get("center", start)
+		blend_mesh.basis = Basis.IDENTITY
+		blend_mesh.material_override = material
+
+	if show_wood_wireframe:
+		_render_wireframe_decimated(
+			node_id,
+			cylinder_specs,
+			blend_specs
+		)
 
 	if node.is_graft:
 		var graft_marker := _get_graft_marker(node_id)
 		graft_marker.visible = true
 		graft_marker.position = start
 
-	var top_radius_cut: float = _get_tip_radius(node_id) * thickness_visual_scale
 	if node.cut_timestamp >= 0.0:
-		var cap := _get_cap(node_id)
-		cap.visible = true
-		cap.mesh = _build_cylinder(
-			top_radius_cut * 0.35,
-			top_radius_cut,
-			top_radius_cut * 0.15
-		)
-		_orient_segment(cap, end - direction * (top_radius_cut * 0.175), direction, top_radius_cut * 0.35)
-		cap.material_override = cut_material
+		_render_cut_cap(node_id, end, direction)
+	else:
+		_render_tip_disc_cap(node_id, end, direction)
 
 	_update_pick_area(node_id, start, end, node.thickness * thickness_visual_scale)
+	_prune_branch_chain_pool(node_id, cylinder_specs.size(), blend_specs.size())
+	var wire_chain_count: int = cylinder_specs.size() if show_wood_wireframe else 0
+	var wire_blend_count: int = blend_specs.size() if show_wood_wireframe else 0
+	_prune_wireframe_pool(node_id, wire_chain_count, wire_blend_count, false)
+
+
+func _render_branch_skinned(node_id: int) -> void:
+	var node = _graph.nodes[node_id]
+	if node.length <= 0.001:
+		return
+
+	var start: Vector3 = _graph.get_joint(node_id)
+	var end: Vector3 = _graph.get_world_tip(node_id)
+	var direction: Vector3 = (end - start).normalized()
+	var height: float = maxf(start.distance_to(end), 0.02)
+
+	var guide_samples: Array = _scale_sample_radii(
+		_graph.get_bark_guide_samples(node_id, guide_ring_spacing)
+	)
+	if guide_samples.size() < 2:
+		_render_branch_cylinder(node_id)
+		return
+
+	var wobble: Array = BranchMeshBuilder.generate_locked_wobble(
+		node.id,
+		radial_segments,
+		bark_variation
+	)
+	var densify: bool = branch_mesh_mode == BranchMeshMode.RING_LOFT
+	var bark_meshes: Dictionary = BranchMeshBuilder.build_bark_branch_meshes(
+		guide_samples,
+		wobble,
+		radial_segments,
+		densify,
+		node.length,
+		direction,
+		guide_ring_spacing
+	)
+	var branch_mesh: ArrayMesh = bark_meshes.get("surface")
+
+	if branch_mesh == null:
+		_render_branch_cylinder(node_id)
+		return
+
+	var mesh_instance := _get_segment(node_id)
+	mesh_instance.visible = true
+	mesh_instance.mesh = branch_mesh
+	mesh_instance.position = start
+	mesh_instance.basis = Basis.IDENTITY
+	mesh_instance.material_override = graft_material if node.is_graft else trunk_material
+
+	if show_wood_wireframe:
+		_render_bark_wireframe(node_id, bark_meshes.get("wireframe"), start)
+
+	if node.is_graft:
+		var graft_marker := _get_graft_marker(node_id)
+		graft_marker.visible = true
+		graft_marker.position = start
+
+	if node.cut_timestamp >= 0.0:
+		_render_cut_cap(node_id, end, direction)
+
+	_update_pick_area(node_id, start, end, node.thickness * thickness_visual_scale)
+	_prune_branch_chain_pool(node_id, 0, 0)
+	_prune_wireframe_pool(node_id, 0, 0, false)
+
+
+func _render_fork_hub(parent_id: int) -> void:
+	var parent = _graph.nodes[parent_id]
+	var hub_center: Vector3 = _graph.get_world_tip(parent_id)
+	var parent_dir: Vector3 = parent.last_profile_direction
+	if parent_dir.length_squared() <= 0.0001:
+		parent_dir = parent.direction
+	parent_dir = parent_dir.normalized()
+
+	var parent_r: float = _get_tip_radius(parent_id)
+	var child_specs: Array = []
+	for child_id in parent.children:
+		var child = _graph.nodes[child_id]
+		var child_r: float = _get_base_radius(child_id)
+		if child.profile_joint_radius >= 0.0:
+			child_r = child.profile_joint_radius * thickness_visual_scale
+		child_specs.append({
+			"dir": child.direction.normalized(),
+			"r": child_r,
+		})
+
+	var hub_mesh: ArrayMesh = BranchMeshBuilder.build_fork_hub(
+		hub_center,
+		parent_dir,
+		parent_r,
+		child_specs,
+		radial_segments
+	)
+	if hub_mesh == null:
+		return
+
+	var hub_instance := _get_fork_hub(parent_id)
+	hub_instance.visible = true
+	hub_instance.mesh = hub_mesh
+	hub_instance.position = Vector3.ZERO
+	hub_instance.basis = Basis.IDENTITY
+	hub_instance.material_override = graft_material if parent.is_graft else trunk_material
+
+
+func _uses_profile_guides() -> bool:
+	return branch_mesh_mode != BranchMeshMode.CYLINDERS
+
+
+func _uses_fork_hubs() -> bool:
+	return branch_mesh_mode == BranchMeshMode.SWEPT_TUBE \
+		or branch_mesh_mode == BranchMeshMode.RING_LOFT
+
+
+func _get_fork_hub(parent_id: int) -> MeshInstance3D:
+	if not _hub_pool.has(parent_id):
+		var mesh_instance := MeshInstance3D.new()
+		mesh_instance.name = "ForkHub_%d" % parent_id
+		_segments_root.add_child(mesh_instance)
+		_hub_pool[parent_id] = mesh_instance
+	return _hub_pool[parent_id]
+
+
+func _render_bark_wireframe(node_id: int, wire_mesh: ArrayMesh, start: Vector3) -> void:
+	if wire_mesh == null:
+		return
+	var wire_key: String = "%d:bark" % node_id
+	var mesh_instance := _get_wireframe(wire_key)
+	mesh_instance.visible = true
+	mesh_instance.mesh = wire_mesh
+	mesh_instance.position = start
+	mesh_instance.basis = Basis.IDENTITY
+	mesh_instance.material_override = _wireframe_material
+
+
+func _render_wireframe_cylinder(
+	node_id: int,
+	start: Vector3,
+	direction: Vector3,
+	height: float,
+	bottom_radius: float,
+	top_radius: float
+) -> void:
+	var wire_key: String = "%d:main" % node_id
+	var mesh_instance := _get_wireframe(wire_key)
+	mesh_instance.visible = true
+	mesh_instance.mesh = BranchMeshBuilder.build_cylinder_wireframe(
+		height,
+		bottom_radius,
+		top_radius,
+		radial_segments
+	)
+	_orient_segment(mesh_instance, start, direction, height)
+	mesh_instance.material_override = _wireframe_material
+
+
+func _render_wireframe_decimated(
+	node_id: int,
+	cylinder_specs: Array,
+	blend_specs: Array
+) -> void:
+	for i in range(cylinder_specs.size()):
+		var spec: Dictionary = cylinder_specs[i]
+		var wire_key: String = "%d:c:%d" % [node_id, i]
+		var mesh_instance := _get_wireframe(wire_key)
+		mesh_instance.visible = true
+		var seg_start: Vector3 = spec.get("start", Vector3.ZERO)
+		var seg_end: Vector3 = spec.get("end", Vector3.ZERO)
+		var seg_dir: Vector3 = (seg_end - seg_start).normalized()
+		var seg_height: float = seg_start.distance_to(seg_end)
+		mesh_instance.mesh = BranchMeshBuilder.build_cylinder_wireframe(
+			seg_height,
+			float(spec.get("bottom_r", 0.01)) * thickness_visual_scale,
+			float(spec.get("top_r", 0.01)) * thickness_visual_scale,
+			radial_segments
+		)
+		_orient_segment(mesh_instance, seg_start, seg_dir, seg_height)
+		mesh_instance.material_override = _wireframe_material
+
+	for i in range(blend_specs.size()):
+		var spec: Dictionary = blend_specs[i]
+		var wire_key: String = "%d:b:%d" % [node_id, i]
+		var mesh_instance := _get_wireframe(wire_key)
+		mesh_instance.visible = true
+		var radius: float = float(spec.get("radius", 0.01)) * thickness_visual_scale
+		mesh_instance.mesh = BranchMeshBuilder.build_sphere_wireframe(
+			maxf(radius, 0.003),
+			maxi(radial_segments, 8)
+		)
+		mesh_instance.position = spec.get("center", Vector3.ZERO)
+		mesh_instance.basis = Basis.IDENTITY
+		mesh_instance.material_override = _wireframe_material
+
+
+func _get_wireframe(wire_key: String) -> MeshInstance3D:
+	if not _wireframe_pool.has(wire_key):
+		var mesh_instance := MeshInstance3D.new()
+		mesh_instance.name = "Wire_%s" % wire_key
+		mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_wireframe_root.add_child(mesh_instance)
+		_wireframe_pool[wire_key] = mesh_instance
+	return _wireframe_pool[wire_key]
+
+
+func _prune_wireframe_pool(
+	node_id: int,
+	chain_count: int,
+	blend_count: int,
+	keep_main: bool
+) -> void:
+	var main_key: String = "%d:main" % node_id
+	if not keep_main and _wireframe_pool.has(main_key):
+		_wireframe_pool[main_key].queue_free()
+		_wireframe_pool.erase(main_key)
+
+	var bark_key: String = "%d:bark" % node_id
+	if _wireframe_pool.has(bark_key) and (keep_main or chain_count > 0):
+		_wireframe_pool[bark_key].queue_free()
+		_wireframe_pool.erase(bark_key)
+
+	var chain_prefix: String = "%d:c:" % node_id
+	for key in _wireframe_pool.keys():
+		if not str(key).begins_with(chain_prefix):
+			continue
+		var index: int = int(str(key).get_slice(":", 2))
+		if index >= chain_count:
+			_wireframe_pool[key].queue_free()
+			_wireframe_pool.erase(key)
+
+	var blend_prefix: String = "%d:b:" % node_id
+	for key in _wireframe_pool.keys():
+		if not str(key).begins_with(blend_prefix):
+			continue
+		var index: int = int(str(key).get_slice(":", 2))
+		if index >= blend_count:
+			_wireframe_pool[key].queue_free()
+			_wireframe_pool.erase(key)
+
+
+func _prune_branch_chain_pool(node_id: int, chain_count: int, blend_count: int) -> void:
+	var chain_prefix: String = "%d:c:" % node_id
+	for key in _chain_pool.keys():
+		if not str(key).begins_with(chain_prefix):
+			continue
+		var index: int = int(str(key).get_slice(":", 2))
+		if index >= chain_count:
+			_chain_pool[key].queue_free()
+			_chain_pool.erase(key)
+
+	var blend_prefix: String = "%d:b:" % node_id
+	for key in _blend_pool.keys():
+		if not str(key).begins_with(blend_prefix):
+			continue
+		var index: int = int(str(key).get_slice(":", 2))
+		if index >= blend_count:
+			_blend_pool[key].queue_free()
+			_blend_pool.erase(key)
 
 
 func _scale_sample_radii(samples: Array) -> Array:
@@ -333,44 +659,22 @@ func _scale_sample_radii(samples: Array) -> Array:
 	return scaled
 
 
-func _ensure_branch_wobble(node) -> Array:
-	if node.locked_wobble.is_empty():
-		node.locked_wobble = BranchMeshBuilder.generate_locked_wobble(
-			node.id,
-			radial_segments,
-			bark_variation
-		)
-	return node.locked_wobble
-
-
-func _render_skeleton_guides(node_id: int, joint: Vector3, guide_samples: Array) -> void:
-	var centers: Array = BranchMeshBuilder.compute_sample_centers(guide_samples)
-	for i in range(guide_samples.size()):
-		var sample: Dictionary = guide_samples[i]
-		var guide_key: String = "%d:%d" % [node_id, i]
-		var guide_mesh := _get_guide(guide_key)
-		guide_mesh.visible = true
-		var center: Vector3 = joint + centers[i]
-		var direction: Vector3 = sample.get("dir", Vector3.UP)
-		var radius: float = float(sample.get("r", 0.02))
-		var tube_radius: float = maxf(radius * 0.05, 0.001)
-		var torus := TorusMesh.new()
-		torus.inner_radius = maxf(radius - tube_radius, 0.001)
-		torus.outer_radius = radius + tube_radius
-		torus.rings = maxi(radial_segments / 2, 6)
-		torus.ring_segments = maxi(radial_segments, 10)
-		guide_mesh.mesh = torus
-		guide_mesh.material_override = _guide_material
-		_orient_ring(guide_mesh, center, direction)
-
-
-func _get_guide(guide_key: String) -> MeshInstance3D:
-	if not _guide_pool.has(guide_key):
+func _get_chain_segment(chain_key: String) -> MeshInstance3D:
+	if not _chain_pool.has(chain_key):
 		var mesh_instance := MeshInstance3D.new()
-		mesh_instance.name = "Guide_%s" % guide_key
-		_guides_root.add_child(mesh_instance)
-		_guide_pool[guide_key] = mesh_instance
-	return _guide_pool[guide_key]
+		mesh_instance.name = "Chain_%s" % chain_key
+		_segments_root.add_child(mesh_instance)
+		_chain_pool[chain_key] = mesh_instance
+	return _chain_pool[chain_key]
+
+
+func _get_blend_sphere(blend_key: String) -> MeshInstance3D:
+	if not _blend_pool.has(blend_key):
+		var mesh_instance := MeshInstance3D.new()
+		mesh_instance.name = "Blend_%s" % blend_key
+		_segments_root.add_child(mesh_instance)
+		_blend_pool[blend_key] = mesh_instance
+	return _blend_pool[blend_key]
 
 
 func _build_cylinder(height: float, bottom_radius: float, top_radius: float) -> CylinderMesh:
@@ -554,6 +858,34 @@ func _raycast_branch_segment(
 		"t_ray": t_ray,
 		"position": point_on_axis,
 	}
+
+
+func _render_cut_cap(node_id: int, end: Vector3, direction: Vector3) -> void:
+	var top_radius: float = _get_tip_radius(node_id) * thickness_visual_scale
+	var cap := _get_cap(node_id)
+	cap.visible = true
+	cap.mesh = _build_cylinder(
+		top_radius * 0.35,
+		top_radius,
+		top_radius * 0.15
+	)
+	_orient_segment(cap, end - direction * (top_radius * 0.175), direction, top_radius * 0.35)
+	cap.material_override = cut_material
+
+
+func _render_tip_disc_cap(node_id: int, end: Vector3, direction: Vector3) -> void:
+	var node = _graph.nodes[node_id]
+	var cap_radius: float = _get_tip_radius(node_id) * thickness_visual_scale
+	var cap := _get_cap(node_id)
+	cap.visible = true
+	cap.mesh = BranchMeshBuilder.build_disc_cap_mesh(
+		cap_radius,
+		direction,
+		radial_segments
+	)
+	cap.position = end
+	cap.basis = Basis.IDENTITY
+	cap.material_override = graft_material if node.is_graft else trunk_material
 
 
 func _orient_segment(mesh_instance: MeshInstance3D, start: Vector3, direction: Vector3, height: float) -> void:

@@ -194,17 +194,27 @@ text = "Branch rendering"
 [node name="BarkModeOption" type="OptionButton" parent="Panel/Scroll/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
-item_count = 2
+item_count = 4
 popup/item_0/text = "Cylinders"
 popup/item_0/id = 0
-popup/item_1/text = "Tessellated bark"
+popup/item_1/text = "Decimated cylinders"
 popup/item_1/id = 1
+popup/item_2/text = "Swept tube"
+popup/item_2/id = 2
+popup/item_3/text = "Ring loft"
+popup/item_3/id = 3
 selected = 1
 
-[node name="SkeletonGuidesToggle" type="CheckButton" parent="Panel/Scroll/VBox"]
+[node name="WoodWireframeToggle" type="CheckButton" parent="Panel/Scroll/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
-text = "Show skeleton guide rings"
+text = "Show wood wireframe"
+
+[node name="RootsToggle" type="CheckButton" parent="Panel/Scroll/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
+text = "Show roots"
 
 [node name="GrowStepButton" type="Button" parent="Panel/Scroll/VBox"]
 unique_name_in_owner = true

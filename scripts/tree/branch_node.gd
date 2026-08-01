@@ -30,6 +30,7 @@ var last_ring_sample_dist: float = 0.0
 var last_profile_direction: Vector3 = Vector3.UP
 var profile_frame_right: Vector3 = Vector3.ZERO
 var profile_joint_radius: float = -1.0
+var stochastic_direction: bool = true
 
 
 func to_dict() -> Dictionary:
@@ -63,6 +64,7 @@ func to_dict() -> Dictionary:
 		"last_profile_direction": [last_profile_direction.x, last_profile_direction.y, last_profile_direction.z],
 		"profile_frame_right": [profile_frame_right.x, profile_frame_right.y, profile_frame_right.z],
 		"profile_joint_radius": profile_joint_radius,
+		"stochastic_direction": stochastic_direction,
 	}
 
 
@@ -124,6 +126,7 @@ static func from_dict(data: Dictionary):
 		float(frame_right_data[2])
 	)
 	node.profile_joint_radius = float(data.get("profile_joint_radius", -1.0))
+	node.stochastic_direction = bool(data.get("stochastic_direction", true))
 	node.ring_samples = []
 	for sample_data in data.get("ring_samples", []):
 		if sample_data is Dictionary:

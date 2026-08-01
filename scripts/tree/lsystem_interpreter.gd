@@ -17,7 +17,7 @@ static func apply_at_tip(graph, tip_id: int, pattern) -> void:
 	if production.is_empty():
 		return
 
-	var deterministic: bool = pattern.deterministic_growth
+	var deterministic: bool = pattern.deterministic_growth or not tip.stochastic_direction
 	var rng: RandomNumberGenerator = graph.get_rng() if not deterministic else null
 	var angle: float = deg_to_rad(pattern.lsystem_angle_deg)
 	var heading: Vector3 = tip.direction.normalized()
@@ -109,22 +109,28 @@ static func apply_at_tip(graph, tip_id: int, pattern) -> void:
 			spawn.direction,
 			spawn.lsymbol,
 			pattern,
-			spawn.turtle_up
+			spawn.turtle_up,
+			tip.stochastic_direction
 		)
 
 	tip.length_at_last_production = tip.length
 
 	if parent_continues:
-		tip.direction = _spread_direction(heading, pattern, rng, deterministic)
-		tip.turtle_up = _turtle_up_for_spawn(
-			tip.direction,
+		var new_dir: Vector3 = _spread_direction(heading, pattern, rng, deterministic)
+		var new_up: Vector3 = _turtle_up_for_spawn(
+			new_dir,
 			left,
 			rng,
 			pattern,
 			deterministic
 		)
-		tip.lsymbol = _continuing_symbol(production)
-		tip.is_growing_tip = true
+		graph.continue_growth_segment(
+			tip_id,
+			new_dir,
+			new_up,
+			_continuing_symbol(production),
+			pattern
+		)
 	else:
 		tip.is_growing_tip = false
 
@@ -140,8 +146,8 @@ static func apply_prune_seed(graph, tip_id: int, pattern) -> int:
 	if production.is_empty():
 		return 0
 
-	var deterministic: bool = pattern.deterministic_growth
-	var rng: RandomNumberGenerator = graph.get_rng() if not deterministic else null
+	var deterministic: bool = true
+	var rng: RandomNumberGenerator = null
 	var angle: float = deg_to_rad(pattern.lsystem_angle_deg)
 	var heading: Vector3 = tip.direction.normalized()
 	var turtle_up: Vector3 = _sanitize_turtle_up(heading, tip.turtle_up)
@@ -235,7 +241,8 @@ static func apply_prune_seed(graph, tip_id: int, pattern) -> int:
 			spawn.direction,
 			spawn.lsymbol,
 			pattern,
-			spawn.turtle_up
+			spawn.turtle_up,
+			false
 		)
 		if child != null:
 			spawned += 1

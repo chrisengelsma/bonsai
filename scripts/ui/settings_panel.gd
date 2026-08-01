@@ -10,6 +10,7 @@ signal closed
 @onready var grow_speed_label: Label = %GrowSpeedLabel
 @onready var music_check: CheckBox = %MusicCheck
 @onready var ambience_check: CheckBox = %AmbienceCheck
+@onready var roots_check: CheckBox = %RootsCheck
 @onready var species_option: OptionButton = %SpeciesOption
 @onready var reset_button: Button = %ResetButton
 @onready var lab_button: Button = %LabButton
@@ -27,6 +28,7 @@ func _ready() -> void:
 	grow_speed_slider.value_changed.connect(_on_grow_speed_changed)
 	music_check.toggled.connect(_on_music_toggled)
 	ambience_check.toggled.connect(_on_ambience_toggled)
+	roots_check.toggled.connect(_on_roots_toggled)
 	reset_button.pressed.connect(_on_reset_pressed)
 	lab_button.pressed.connect(_on_lab_pressed)
 	close_button.pressed.connect(_close)
@@ -34,6 +36,7 @@ func _ready() -> void:
 
 	music_check.button_pressed = GameState.music_enabled
 	ambience_check.button_pressed = GameState.ambience_enabled
+	roots_check.button_pressed = GameState.show_roots
 	backdrop.gui_input.connect(_on_backdrop_gui_input)
 	get_viewport().size_changed.connect(_apply_mobile_layout)
 	_populate_species()
@@ -57,6 +60,7 @@ func _populate_species() -> void:
 func open() -> void:
 	visible = true
 	grow_speed_slider.value = GameState.grow_speed_multiplier
+	roots_check.button_pressed = GameState.show_roots
 	_apply_mobile_layout()
 
 
@@ -112,6 +116,11 @@ func _on_music_toggled(enabled: bool) -> void:
 func _on_ambience_toggled(enabled: bool) -> void:
 	GameState.ambience_enabled = enabled
 	AudioManager.set_bus_mute("Ambience", not enabled)
+	SaveManager.save_game(GameState.build_save_data())
+
+
+func _on_roots_toggled(enabled: bool) -> void:
+	GameState.set_show_roots(enabled)
 	SaveManager.save_game(GameState.build_save_data())
 
 
