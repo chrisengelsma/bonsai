@@ -1,6 +1,6 @@
 extends RefCounted
 
-const GrowPatternScript = preload("res://scripts/tree/grow_pattern.gd")
+const LSystemParams = preload("res://scripts/lsystem/lsystem_params.gd")
 const CLASSIC_PATTERN := preload("res://resources/species/classic_upright_pattern.tres")
 const CASCADE_PATTERN := preload("res://resources/species/cascade_pattern.tres")
 const GINSENG_PATTERN := preload("res://resources/species/ginseng_ficus_pattern.tres")
@@ -19,16 +19,16 @@ static func get_names() -> Array[String]:
 	]
 
 
-static func load_preset(index: int):
+static func load_preset(index: int) -> LSystemParams:
 	match index:
 		0:
-			return CLASSIC_PATTERN.duplicate(true)
+			return LSystemParams.from_grow_pattern(CLASSIC_PATTERN)
 		1:
-			return CASCADE_PATTERN.duplicate(true)
+			return LSystemParams.from_grow_pattern(CASCADE_PATTERN)
 		2:
-			return GINSENG_PATTERN.duplicate(true)
+			return LSystemParams.from_grow_pattern(GINSENG_PATTERN)
 		3:
-			return JUNIPER_PATTERN.duplicate(true)
+			return LSystemParams.from_grow_pattern(JUNIPER_PATTERN)
 		4:
 			return _custom(
 				"T",
@@ -63,7 +63,7 @@ static func load_preset(index: int):
 				3
 			)
 		_:
-			return CLASSIC_PATTERN.duplicate(true)
+			return LSystemParams.from_grow_pattern(CLASSIC_PATTERN)
 
 
 static func _custom(
@@ -74,28 +74,16 @@ static func _custom(
 	growth_rate: float,
 	gravity: float,
 	max_depth: int,
-	max_children: int = 2
-) -> Resource:
-	var pattern = GrowPatternScript.new()
-	pattern.lsystem_axiom = axiom
-	pattern.lsystem_rules_text = rules
-	pattern.lsystem_angle_deg = angle
-	pattern.lsystem_segment_length = segment_length
-	pattern.tip_growth_rate = growth_rate
-	pattern.gravity_curve = gravity
-	pattern.max_branch_depth = max_depth
-	pattern.use_lsystem = true
-	pattern.deterministic_growth = true
-	pattern.angle_jitter_deg = 0.0
-	pattern.segment_length_jitter = 0.0
-	pattern.lateral_skip_chance = 0.0
-	pattern.growth_energy_variance = 0.0
-	pattern.lateral_roll_spread_deg = 0.0
-	pattern.spatial_spread_deg = 0.0
-	pattern.trunk_thickness = 0.023
-	pattern.branch_thickness = 0.009
-	pattern.thickness_falloff = 0.68
-	pattern.foliage_start_length = 0.05
-	pattern.foliage_growth_rate = 0.16
-	pattern.max_children_per_node = max_children
-	return pattern
+	_max_children: int = 2
+) -> LSystemParams:
+	var params := LSystemParams.new()
+	params.axiom = axiom
+	params.rules_text = rules
+	params.angle_deg = angle
+	params.segment_length = segment_length
+	params.growth_rate = growth_rate
+	params.gravity = gravity
+	params.iterations = max_depth
+	params.max_children = _max_children
+	params.deterministic = true
+	return params

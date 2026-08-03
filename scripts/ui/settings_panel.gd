@@ -8,6 +8,8 @@ signal closed
 @onready var backdrop: ColorRect = $Backdrop
 @onready var grow_speed_slider: HSlider = %GrowSpeedSlider
 @onready var grow_speed_label: Label = %GrowSpeedLabel
+@onready var camera_distance_slider: HSlider = %CameraDistanceSlider
+@onready var camera_distance_label: Label = %CameraDistanceLabel
 @onready var music_check: CheckBox = %MusicCheck
 @onready var ambience_check: CheckBox = %AmbienceCheck
 @onready var roots_check: CheckBox = %RootsCheck
@@ -26,6 +28,7 @@ func _ready() -> void:
 	_update_grow_speed_label(GameState.grow_speed_multiplier)
 
 	grow_speed_slider.value_changed.connect(_on_grow_speed_changed)
+	camera_distance_slider.value_changed.connect(_on_camera_distance_changed)
 	music_check.toggled.connect(_on_music_toggled)
 	ambience_check.toggled.connect(_on_ambience_toggled)
 	roots_check.toggled.connect(_on_roots_toggled)
@@ -36,6 +39,7 @@ func _ready() -> void:
 
 	music_check.button_pressed = GameState.music_enabled
 	ambience_check.button_pressed = GameState.ambience_enabled
+	roots_check.visible = GameState.ROOTS_ENABLED
 	roots_check.button_pressed = GameState.show_roots
 	backdrop.gui_input.connect(_on_backdrop_gui_input)
 	get_viewport().size_changed.connect(_apply_mobile_layout)
@@ -44,6 +48,7 @@ func _ready() -> void:
 
 
 var _populating_species: bool = false
+var _orbit_camera: Node3D
 
 
 func _populate_species() -> void:
@@ -60,7 +65,12 @@ func _populate_species() -> void:
 func open() -> void:
 	visible = true
 	grow_speed_slider.value = GameState.grow_speed_multiplier
+	roots_check.visible = GameState.ROOTS_ENABLED
 	roots_check.button_pressed = GameState.show_roots
+	_orbit_camera = _get_orbit_camera()
+	if _orbit_camera != null and not _orbit_camera.distance_changed.is_connected(_on_orbit_distance_changed):
+		_orbit_camera.distance_changed.connect(_on_orbit_distance_changed)
+	_sync_camera_distance()
 	_apply_mobile_layout()
 
 
@@ -93,6 +103,9 @@ func _on_backdrop_gui_input(event: InputEvent) -> void:
 
 
 func _close() -> void:
+	if _orbit_camera != null and _orbit_camera.distance_changed.is_connected(_on_orbit_distance_changed):
+		_orbit_camera.distance_changed.disconnect(_on_orbit_distance_changed)
+	_orbit_camera = null
 	visible = false
 	closed.emit()
 
@@ -105,6 +118,44 @@ func _on_grow_speed_changed(value: float) -> void:
 
 func _update_grow_speed_label(value: float) -> void:
 	grow_speed_label.text = "Growth speed: %.1fx" % value
+
+
+func _get_orbit_camera() -> Node3D:
+	var scene_root: Node = get_tree().current_scene
+	if scene_root == null:
+		return null
+	return scene_root.get_node_or_null("OrbitCamera") as Node3D
+
+
+func _sync_camera_distance() -> void:
+	var camera: Node3D = _get_orbit_camera()
+	if camera == null:
+		camera_distance_slider.value = GameState.camera_distance
+		_update_camera_distance_label(GameState.camera_distance)
+		return
+	camera_distance_slider.min_value = camera.min_distance
+	camera_distance_slider.max_value = camera.max_distance
+	camera_distance_slider.value = camera.get_camera_distance()
+	_update_camera_distance_label(camera_distance_slider.value)
+
+
+func _on_camera_distance_changed(value: float) -> void:
+	var camera: Node3D = _get_orbit_camera()
+	if camera != null and camera.has_method("set_camera_distance"):
+		camera.set_camera_distance(value)
+	else:
+		GameState.camera_distance = value
+	_update_camera_distance_label(value)
+	SaveManager.save_game(GameState.build_save_data())
+
+
+func _update_camera_distance_label(value: float) -> void:
+	camera_distance_label.text = "Camera distance: %.1f" % value
+
+
+func _on_orbit_distance_changed(value: float) -> void:
+	camera_distance_slider.set_value_no_signal(value)
+	_update_camera_distance_label(value)
 
 
 func _on_music_toggled(enabled: bool) -> void:
@@ -132,7 +183,7 @@ func _on_reset_pressed() -> void:
 
 
 func _on_lab_pressed() -> void:
-	get_tree().change_scene_to_file("res://scenes/lab/LSystemLab.tscn")
+	get_tree().change_scene_to_file("res://scenes/lab/TreeLab.tscn")
 
 
 func _on_species_selected(index: int) -> void:

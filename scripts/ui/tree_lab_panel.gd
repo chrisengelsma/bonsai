@@ -1,0 +1,380 @@
+extends Control
+
+const MobileUtils = preload("res://scripts/platform/mobile_utils.gd")
+const LSystemPresets = preload("res://scripts/lab/lsystem_presets.gd")
+const LSystemParams = preload("res://scripts/lsystem/lsystem_params.gd")
+
+enum ToolMode { VIEW, PRUNE, PINCH }
+
+signal preset_selected(index: int)
+signal apply_pressed(params: LSystemParams)
+signal reset_pressed
+signal grow_speed_changed(value: float)
+signal random_factor_changed(value: float)
+signal auxin_changed
+signal tool_mode_changed(mode: int)
+signal display_changed
+signal camera_distance_changed(value: float)
+signal grow_step_pressed
+signal main_menu_pressed
+
+@onready var preset_option: OptionButton = %PresetOption
+@onready var axiom_field: LineEdit = %AxiomField
+@onready var rules_field: TextEdit = %RulesField
+@onready var angle_slider: HSlider = %AngleSlider
+@onready var angle_label: Label = %AngleLabel
+@onready var segment_slider: HSlider = %SegmentSlider
+@onready var segment_label: Label = %SegmentLabel
+@onready var growth_slider: HSlider = %GrowthSlider
+@onready var growth_label: Label = %GrowthLabel
+@onready var gravity_slider: HSlider = %GravitySlider
+@onready var gravity_label: Label = %GravityLabel
+@onready var depth_slider: HSlider = %DepthSlider
+@onready var depth_label: Label = %DepthLabel
+@onready var children_slider: HSlider = %ChildrenSlider
+@onready var children_label: Label = %ChildrenLabel
+@onready var speed_slider: HSlider = %SpeedSlider
+@onready var speed_label: Label = %SpeedLabel
+@onready var random_slider: HSlider = %RandomSlider
+@onready var random_label: Label = %RandomLabel
+@onready var angle_jitter_slider: HSlider = %AngleJitterSlider
+@onready var angle_jitter_label: Label = %AngleJitterLabel
+@onready var segment_jitter_slider: HSlider = %SegmentJitterSlider
+@onready var segment_jitter_label: Label = %SegmentJitterLabel
+@onready var spread_slider: HSlider = %SpreadSlider
+@onready var spread_label: Label = %SpreadLabel
+@onready var roll_slider: HSlider = %RollSlider
+@onready var roll_label: Label = %RollLabel
+@onready var skip_slider: HSlider = %SkipSlider
+@onready var skip_label: Label = %SkipLabel
+@onready var energy_slider: HSlider = %EnergySlider
+@onready var energy_label: Label = %EnergyLabel
+@onready var dominance_slider: HSlider = %DominanceSlider
+@onready var dominance_label: Label = %DominanceLabel
+@onready var decay_slider: HSlider = %DecaySlider
+@onready var decay_label: Label = %DecayLabel
+@onready var strength_slider: HSlider = %StrengthSlider
+@onready var strength_label: Label = %StrengthLabel
+@onready var deterministic_toggle: CheckButton = %DeterministicToggle
+@onready var wireframe_toggle: CheckButton = %WireframeToggle
+@onready var centerlines_toggle: CheckButton = %CenterlinesToggle
+@onready var camera_distance_slider: HSlider = %CameraDistanceSlider
+@onready var camera_distance_label: Label = %CameraDistanceLabel
+@onready var view_button: Button = %ViewButton
+@onready var prune_button: Button = %PruneButton
+@onready var pinch_button: Button = %PinchButton
+@onready var grow_step_button: Button = %GrowStepButton
+@onready var apply_button: Button = %ApplyButton
+@onready var reset_button: Button = %ResetButton
+@onready var main_button: Button = %MainButton
+@onready var panel: PanelContainer = %Panel
+
+var _syncing: bool = false
+var _tool_mode: int = ToolMode.VIEW
+
+
+func _ready() -> void:
+	_populate_presets()
+
+	preset_option.item_selected.connect(_on_preset_selected)
+	angle_slider.value_changed.connect(_on_angle_changed)
+	segment_slider.value_changed.connect(_on_segment_changed)
+	growth_slider.value_changed.connect(_on_growth_changed)
+	gravity_slider.value_changed.connect(_on_gravity_changed)
+	depth_slider.value_changed.connect(_on_depth_changed)
+	children_slider.value_changed.connect(_on_children_changed)
+	speed_slider.value_changed.connect(_on_speed_changed)
+	random_slider.value_changed.connect(_on_random_changed)
+	angle_jitter_slider.value_changed.connect(_on_angle_jitter_changed)
+	segment_jitter_slider.value_changed.connect(_on_segment_jitter_changed)
+	spread_slider.value_changed.connect(_on_spread_changed)
+	roll_slider.value_changed.connect(_on_roll_changed)
+	skip_slider.value_changed.connect(_on_skip_changed)
+	energy_slider.value_changed.connect(_on_energy_changed)
+	dominance_slider.value_changed.connect(_on_auxin_changed)
+	decay_slider.value_changed.connect(_on_auxin_changed)
+	strength_slider.value_changed.connect(_on_auxin_changed)
+	deterministic_toggle.toggled.connect(_on_deterministic_toggled)
+	wireframe_toggle.toggled.connect(_on_display_changed)
+	centerlines_toggle.toggled.connect(_on_display_changed)
+	camera_distance_slider.value_changed.connect(_on_camera_distance_changed)
+	view_button.pressed.connect(func(): _set_tool_mode(ToolMode.VIEW))
+	prune_button.pressed.connect(func(): _set_tool_mode(ToolMode.PRUNE))
+	pinch_button.pressed.connect(func(): _set_tool_mode(ToolMode.PINCH))
+	grow_step_button.pressed.connect(func(): grow_step_pressed.emit())
+	apply_button.pressed.connect(_emit_apply)
+	reset_button.pressed.connect(func(): reset_pressed.emit())
+	main_button.pressed.connect(func(): main_menu_pressed.emit())
+
+	get_viewport().size_changed.connect(_apply_mobile_layout)
+	_apply_mobile_layout()
+	_set_tool_mode(ToolMode.VIEW)
+
+
+func _populate_presets() -> void:
+	preset_option.clear()
+	for name in LSystemPresets.get_names():
+		preset_option.add_item(name)
+
+
+func sync_from_params(params: LSystemParams, preset_index: int, random_factor: float = 0.0) -> void:
+	_syncing = true
+	if preset_index >= 0 and preset_index < preset_option.item_count:
+		preset_option.select(preset_index)
+	axiom_field.text = params.axiom
+	rules_field.text = params.rules_text
+	angle_slider.value = params.angle_deg
+	segment_slider.value = params.segment_length
+	growth_slider.value = params.growth_rate
+	gravity_slider.value = params.gravity
+	depth_slider.value = params.iterations
+	children_slider.value = params.max_children
+	random_slider.value = random_factor
+	angle_jitter_slider.value = params.angle_jitter_deg
+	segment_jitter_slider.value = params.segment_length_jitter
+	spread_slider.value = params.spatial_spread_deg
+	roll_slider.value = params.lateral_roll_spread_deg
+	skip_slider.value = params.lateral_skip_chance
+	energy_slider.value = params.growth_energy_variance
+	dominance_slider.value = params.apical_dominance
+	decay_slider.value = params.auxin_decay
+	strength_slider.value = params.auxin_source_strength
+	deterministic_toggle.button_pressed = params.deterministic
+	set_grow_step_enabled(true)
+	set_grow_step_growing(false)
+	_update_labels()
+	_syncing = false
+
+
+func set_grow_step_enabled(enabled: bool) -> void:
+	grow_step_button.disabled = not enabled
+
+
+func set_grow_step_growing(growing: bool) -> void:
+	if growing:
+		grow_step_button.disabled = true
+		grow_step_button.text = "Growing…"
+	else:
+		grow_step_button.text = "Grow Step"
+
+
+func get_tool_mode() -> int:
+	return _tool_mode
+
+
+func get_grow_speed() -> float:
+	return speed_slider.value
+
+
+func show_wireframe() -> bool:
+	return wireframe_toggle.button_pressed
+
+
+func show_centerlines() -> bool:
+	return centerlines_toggle.button_pressed
+
+
+func sync_camera_distance(distance: float, min_distance: float, max_distance: float) -> void:
+	_syncing = true
+	camera_distance_slider.min_value = min_distance
+	camera_distance_slider.max_value = max_distance
+	camera_distance_slider.value = clampf(distance, min_distance, max_distance)
+	_on_camera_distance_changed(camera_distance_slider.value)
+	_syncing = false
+
+
+func collect_params() -> LSystemParams:
+	var params := LSystemParams.new()
+	params.axiom = axiom_field.text.strip_edges()
+	params.rules_text = rules_field.text
+	params.angle_deg = angle_slider.value
+	params.segment_length = segment_slider.value
+	params.growth_rate = growth_slider.value
+	params.gravity = gravity_slider.value
+	params.iterations = int(depth_slider.value)
+	params.max_children = int(children_slider.value)
+	params.angle_jitter_deg = angle_jitter_slider.value
+	params.segment_length_jitter = segment_jitter_slider.value
+	params.spatial_spread_deg = spread_slider.value
+	params.lateral_roll_spread_deg = roll_slider.value
+	params.lateral_skip_chance = skip_slider.value
+	params.growth_energy_variance = energy_slider.value
+	params.apical_dominance = dominance_slider.value
+	params.auxin_decay = decay_slider.value
+	params.auxin_source_strength = strength_slider.value
+	params.deterministic = deterministic_toggle.button_pressed
+	params.clamp_values()
+	return params
+
+
+func get_random_factor() -> float:
+	return random_slider.value
+
+
+func _emit_apply() -> void:
+	apply_pressed.emit(collect_params())
+
+
+func _set_tool_mode(mode: int) -> void:
+	_tool_mode = mode
+	view_button.button_pressed = mode == ToolMode.VIEW
+	prune_button.button_pressed = mode == ToolMode.PRUNE
+	pinch_button.button_pressed = mode == ToolMode.PINCH
+	tool_mode_changed.emit(mode)
+
+
+func _on_preset_selected(index: int) -> void:
+	if _syncing:
+		return
+	preset_selected.emit(index)
+
+
+func _on_display_changed(_enabled: bool = false) -> void:
+	display_changed.emit()
+
+
+func _on_camera_distance_changed(value: float) -> void:
+	camera_distance_label.text = "Camera distance: %.1f" % value
+	if not _syncing:
+		camera_distance_changed.emit(value)
+
+
+func _on_auxin_changed(_value: float = 0.0) -> void:
+	_on_dominance_changed(dominance_slider.value)
+	_on_decay_changed(decay_slider.value)
+	_on_strength_changed(strength_slider.value)
+	if not _syncing:
+		auxin_changed.emit()
+
+
+func _on_angle_changed(value: float) -> void:
+	angle_label.text = "Turn angle: %.0f°" % value
+
+
+func _on_segment_changed(value: float) -> void:
+	segment_label.text = "Segment length: %.2f" % value
+
+
+func _on_growth_changed(value: float) -> void:
+	growth_label.text = "Growth rate: %.3f" % value
+
+
+func _on_gravity_changed(value: float) -> void:
+	gravity_label.text = "Gravity: %.2f" % value
+
+
+func _on_depth_changed(value: float) -> void:
+	depth_label.text = "Max depth: %d" % int(value)
+
+
+func _on_children_changed(value: float) -> void:
+	children_label.text = "Max children: %d" % int(value)
+
+
+func _on_speed_changed(value: float) -> void:
+	speed_label.text = "Growth speed: %.1fx" % value
+	grow_speed_changed.emit(value)
+
+
+func _on_random_changed(value: float) -> void:
+	random_label.text = "Random preset: %.0f%%" % (value * 100.0)
+	if not _syncing:
+		random_factor_changed.emit(value)
+
+
+func _on_angle_jitter_changed(value: float) -> void:
+	angle_jitter_label.text = "Angle jitter: %.0f°" % value
+
+
+func _on_segment_jitter_changed(value: float) -> void:
+	segment_jitter_label.text = "Length jitter: %.0f%%" % (value * 100.0)
+
+
+func _on_spread_changed(value: float) -> void:
+	spread_label.text = "Spatial spread: %.0f°" % value
+
+
+func _on_roll_changed(value: float) -> void:
+	roll_label.text = "Branch roll: %.0f°" % value
+
+
+func _on_skip_changed(value: float) -> void:
+	skip_label.text = "Skip chance: %.0f%%" % (value * 100.0)
+
+
+func _on_energy_changed(value: float) -> void:
+	energy_label.text = "Energy variance: %.0f%%" % (value * 100.0)
+
+
+func _on_dominance_changed(value: float) -> void:
+	dominance_label.text = "Apical dominance: %.0f%%" % (value * 100.0)
+
+
+func _on_decay_changed(value: float) -> void:
+	decay_label.text = "Auxin decay: %.0f%%" % (value * 100.0)
+
+
+func _on_strength_changed(value: float) -> void:
+	strength_label.text = "Auxin strength: %.1f" % value
+
+
+func _on_deterministic_toggled(enabled: bool) -> void:
+	deterministic_toggle.text = "Deterministic growth" if enabled else "Stochastic growth"
+
+
+func _update_labels() -> void:
+	_on_angle_changed(angle_slider.value)
+	_on_segment_changed(segment_slider.value)
+	_on_growth_changed(growth_slider.value)
+	_on_gravity_changed(gravity_slider.value)
+	_on_depth_changed(depth_slider.value)
+	_on_children_changed(children_slider.value)
+	_on_speed_changed(speed_slider.value)
+	_on_random_changed(random_slider.value)
+	_on_angle_jitter_changed(angle_jitter_slider.value)
+	_on_segment_jitter_changed(segment_jitter_slider.value)
+	_on_spread_changed(spread_slider.value)
+	_on_roll_changed(roll_slider.value)
+	_on_skip_changed(skip_slider.value)
+	_on_energy_changed(energy_slider.value)
+	_on_dominance_changed(dominance_slider.value)
+	_on_decay_changed(decay_slider.value)
+	_on_strength_changed(strength_slider.value)
+	_on_deterministic_toggled(deterministic_toggle.button_pressed)
+
+
+func _apply_mobile_layout() -> void:
+	var insets: Dictionary = MobileUtils.get_safe_insets(get_viewport())
+	var viewport_size: Vector2 = get_viewport_rect().size
+	var panel_width: float = clampf(
+		400.0,
+		300.0,
+		minf(460.0, viewport_size.x - insets.left - insets.right - 16.0)
+	)
+
+	panel.anchor_left = 0.0
+	panel.anchor_top = 0.0
+	panel.anchor_right = 0.0
+	panel.anchor_bottom = 1.0
+	panel.offset_left = insets.left
+	panel.offset_top = insets.top
+	panel.offset_right = panel_width
+	panel.offset_bottom = -insets.bottom
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+
+	if MobileUtils.is_mobile():
+		grow_step_button.custom_minimum_size.y = 48.0
+		apply_button.custom_minimum_size.y = 48.0
+		reset_button.custom_minimum_size.y = 48.0
+		main_button.custom_minimum_size.y = 48.0
+		view_button.custom_minimum_size.y = 44.0
+		prune_button.custom_minimum_size.y = 44.0
+		pinch_button.custom_minimum_size.y = 44.0
+	else:
+		grow_step_button.custom_minimum_size = Vector2.ZERO
+		apply_button.custom_minimum_size = Vector2.ZERO
+		reset_button.custom_minimum_size = Vector2.ZERO
+		main_button.custom_minimum_size = Vector2.ZERO
+		view_button.custom_minimum_size = Vector2.ZERO
+		prune_button.custom_minimum_size = Vector2.ZERO
+		pinch_button.custom_minimum_size = Vector2.ZERO

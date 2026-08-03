@@ -1,7 +1,12 @@
 class_name BranchMeshBuilder
 extends RefCounted
 
-const MIN_SEGMENT_LENGTH := 0.004
+const MeshConstants = preload("res://scripts/util/mesh_constants.gd")
+const DeterministicNoise = preload("res://scripts/util/deterministic_noise.gd")
+const Vector3Frame = preload("res://scripts/util/vector3_frame.gd")
+const BranchProfileSamples = preload("res://scripts/tree/branch_profile_samples.gd")
+
+const MIN_SEGMENT_LENGTH := MeshConstants.MIN_CYLINDER_SEGMENT_LENGTH
 const MIN_RING_SPACING := 0.022
 const JOINT_OVERLAP_FRAC := 0.22
 
@@ -16,7 +21,7 @@ static func build_decimated_cylinder_specs(
 	if samples.size() < 2:
 		return []
 
-	var centers: Array = compute_sample_centers(samples)
+	var centers: Array = compute_axis_centers(samples, tip_dir)
 	var specs: Array = []
 	for i in range(samples.size() - 1):
 		var sample_a: Dictionary = samples[i]
@@ -34,14 +39,6 @@ static func build_decimated_cylinder_specs(
 			continue
 
 		var direction: Vector3 = axis / height
-		if tip_dir.length_squared() > 0.0001 and direction.dot(tip_dir) < 0.0:
-			start = joint + centers[i + 1]
-			end = joint + centers[i]
-			direction = -direction
-			var swapped_r: float = bottom_r
-			bottom_r = top_r
-			top_r = swapped_r
-
 		if i > 0:
 			var overlap: float = minf(bottom_r * JOINT_OVERLAP_FRAC, height * 0.18)
 			start -= direction * overlap
@@ -77,7 +74,7 @@ static func build_corner_blend_specs(
 	if samples.size() < 2:
 		return []
 
-	var centers: Array = compute_sample_centers(samples)
+	var centers: Array = compute_axis_centers(samples, tip_dir)
 	var blends: Array = []
 	var min_bend: float = deg_to_rad(min_bend_deg)
 
@@ -122,13 +119,7 @@ static func compute_sample_centers(samples: Array) -> Array:
 
 
 static func compute_axis_centers(samples: Array, tip_dir: Vector3) -> Array:
-	var tip_direction: Vector3 = tip_dir
-	if tip_direction.length_squared() <= 0.0001:
-		if not samples.is_empty():
-			tip_direction = samples[-1].get("dir", Vector3.UP)
-		else:
-			tip_direction = Vector3.UP
-	tip_direction = tip_direction.normalized()
+	var tip_direction: Vector3 = BranchProfileSamples.resolve_tip_direction(tip_dir, samples)
 
 	var centers: Array = []
 	for sample in samples:
@@ -205,25 +196,25 @@ static func _bend_at_index(centers: Array, index: int) -> float:
 static func _position_jitter(seed: int, salt: int, direction: Vector3, amount: float) -> Vector3:
 	if amount <= 0.0:
 		return Vector3.ZERO
-	var reference: Vector3 = Vector3.UP
-	if absf(direction.dot(reference)) > 0.92:
-		reference = Vector3.FORWARD
-	var side: Vector3 = direction.cross(reference).normalized()
+	var side: Vector3 = Vector3Frame.safe_tangent_axis(direction)
 	var up: Vector3 = side.cross(direction).normalized()
-	var jx: float = _hash_unit(seed, salt, 11) * amount * 0.004
-	var jy: float = _hash_unit(seed, salt, 23) * amount * 0.004
+	var jx: float = DeterministicNoise.unit_hash(seed, salt, 11) * amount * 0.004
+	var jy: float = DeterministicNoise.unit_hash(seed, salt, 23) * amount * 0.004
 	return side * jx + up * jy
 
 
 static func _jitter_scalar(seed: int, index: int, channel: int, amount: float) -> float:
 	if amount <= 0.0:
 		return 1.0
-	return 1.0 + _hash_unit(seed, index, channel) * amount
+	return 1.0 + DeterministicNoise.unit_hash(seed, index, channel) * amount
 
 
-static func _hash_unit(seed: int, a: int, b: int) -> float:
-	var h: int = absi(hash(Vector3i(seed, a, b)))
-	return float(h % 10001) / 5000.0 - 1.0
+static func _radius_wobble(surface_seed: int, ring: int, seg: int, amount: float) -> float:
+	if amount <= 0.0:
+		return 1.0
+	var h: int = absi(hash(Vector3i(surface_seed, ring, seg)))
+	var n: float = float(h % 10001) / 5000.0 - 1.0
+	return 1.0 + n * amount
 
 
 static func build_cylinder_wireframe(
@@ -403,10 +394,7 @@ static func _build_spine_path(
 	ring_spacing: float
 ) -> Array:
 	var length: float = maxf(branch_length, 0.02)
-	var tip_direction: Vector3 = tip_dir
-	if tip_direction.length_squared() <= 0.0001:
-		tip_direction = samples[-1].get("dir", Vector3.UP)
-	tip_direction = tip_direction.normalized()
+	var tip_direction: Vector3 = BranchProfileSamples.resolve_tip_direction(tip_dir, samples)
 
 	var ring_count: int = maxi(2, int(ceil(length / maxf(ring_spacing, 0.004))) + 1)
 	var spine: Array = []
@@ -480,10 +468,7 @@ static func finalize_branch_samples(
 		return []
 
 	var length: float = maxf(branch_length, 0.02)
-	var tip_direction: Vector3 = tip_dir
-	if tip_direction.length_squared() <= 0.0001:
-		tip_direction = samples[-1].get("dir", Vector3.UP)
-	tip_direction = tip_direction.normalized()
+	var tip_direction: Vector3 = BranchProfileSamples.resolve_tip_direction(tip_dir, samples)
 
 	var finalized: Array = []
 	for sample in samples:
@@ -695,7 +680,7 @@ static func _build_ring_points(
 
 	var points: Array = []
 	for seg_i in range(radial_segments):
-		var angle: float = TAU * float(seg_i) / float(radial_segments)
+		var angle: float = -TAU * float(seg_i) / float(radial_segments)
 		var wobble: float = 1.0
 		if not locked_wobble.is_empty():
 			wobble = float(locked_wobble[seg_i % locked_wobble.size()])
@@ -705,11 +690,7 @@ static func _build_ring_points(
 
 
 static func _ring_reference_right(direction: Vector3) -> Vector3:
-	var dir: Vector3 = direction.normalized()
-	var reference: Vector3 = Vector3.UP
-	if absf(dir.dot(reference)) > 0.92:
-		reference = Vector3.FORWARD
-	return dir.cross(reference).normalized()
+	return Vector3Frame.safe_tangent_axis(direction.normalized())
 
 
 static func _parallel_transport_right(right: Vector3, from_dir: Vector3, to_dir: Vector3) -> Vector3:
@@ -791,8 +772,8 @@ static func _add_triangle_with_normal(
 
 
 static func _add_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> void:
-	_add_triangle(st, a, c, b)
-	_add_triangle(st, a, d, c)
+	_add_triangle(st, a, b, c)
+	_add_triangle(st, a, c, d)
 
 
 static func _add_triangle(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -> void:
@@ -806,11 +787,3 @@ static func _add_triangle(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -
 	st.add_vertex(b)
 	st.set_normal(normal)
 	st.add_vertex(c)
-
-
-static func _radius_wobble(surface_seed: int, ring: int, seg: int, amount: float) -> float:
-	if amount <= 0.0:
-		return 1.0
-	var h: int = absi(hash(Vector3i(surface_seed, ring, seg)))
-	var n: float = float(h % 10001) / 5000.0 - 1.0
-	return 1.0 + n * amount

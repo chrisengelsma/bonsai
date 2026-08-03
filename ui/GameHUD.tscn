@@ -4,7 +4,7 @@
 [ext_resource type="Theme" path="res://ui/bonsai_theme.tres" id="2"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
-bg_color = Color(0.96, 0.93, 0.87, 0.82)
+bg_color = Color(0.99, 0.98, 0.96, 0.9)
 corner_radius_top_left = 12
 corner_radius_top_right = 12
 corner_radius_bottom_right = 12

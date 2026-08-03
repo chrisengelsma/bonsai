@@ -4,6 +4,11 @@ class_name TreeRenderer
 signal branch_clicked(branch_id: int, hit_position: Vector3)
 
 const BranchMeshBuilder = preload("res://scripts/tree/branch_mesh_builder.gd")
+const BranchSegment = preload("res://scripts/tree/branch_segment.gd")
+const MeshConstants = preload("res://scripts/util/mesh_constants.gd")
+const Vector3Frame = preload("res://scripts/util/vector3_frame.gd")
+
+const MAX_VISUAL_RADIUS := 0.12
 
 enum BranchMeshMode { CYLINDERS, DECIMATED_CYLINDERS, SWEPT_TUBE, RING_LOFT }
 
@@ -16,10 +21,15 @@ enum BranchMeshMode { CYLINDERS, DECIMATED_CYLINDERS, SWEPT_TUBE, RING_LOFT }
 @export var prune_ring_min_radius: float = 0.018
 @export var branch_mesh_mode: BranchMeshMode = BranchMeshMode.CYLINDERS
 @export var show_wood_wireframe: bool = false
+@export var show_centerlines: bool = false
+@export var centerline_color: Color = Color(0.28, 0.82, 1.0, 0.95)
 @export var guide_ring_spacing: float = 0.045
 @export var segment_jitter: float = 0.07
 @export var corner_blend_bend_deg: float = 5.0
 @export var bark_variation: float = 0.09
+
+const HOVER_TORUS_INNER_RADIUS := 0.35
+const HOVER_TORUS_OUTER_RADIUS := 0.5
 
 var _graph
 var _species
@@ -34,8 +44,13 @@ var _pick_areas: Dictionary = {}
 var _segments_root: Node3D
 var _caps_root: Node3D
 var _wireframe_root: Node3D
+var _centerline_root: Node3D
+var _centerline_mesh: MeshInstance3D
+var _overlay_root: Node3D
 var _hover_ring: MeshInstance3D
+var _hover_ring_mesh: TorusMesh
 var _wireframe_material: StandardMaterial3D
+var _centerline_material: StandardMaterial3D
 var _click_start: Vector2 = Vector2.ZERO
 var _click_pending: bool = false
 
@@ -50,7 +65,17 @@ func _ready() -> void:
 	_wireframe_root = Node3D.new()
 	_wireframe_root.name = "WoodWireframe"
 	add_child(_wireframe_root)
-	_hover_ring = _create_hover_ring()
+	_centerline_root = Node3D.new()
+	_centerline_root.name = "Centerlines"
+	add_child(_centerline_root)
+	_centerline_mesh = MeshInstance3D.new()
+	_centerline_mesh.name = "CenterlineMesh"
+	_centerline_root.add_child(_centerline_mesh)
+	_overlay_root = Node3D.new()
+	_overlay_root.name = "Overlays"
+	add_child(_overlay_root)
+	_ensure_hover_ring()
+	_move_centerlines_to_front()
 	_wireframe_material = StandardMaterial3D.new()
 	_wireframe_material.albedo_color = Color(1.0, 1.0, 1.0, 0.95)
 	_wireframe_material.emission_enabled = true
@@ -62,13 +87,16 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	if not prune_hover_enabled or _graph == null:
-		if _hover_ring:
-			_hover_ring.visible = false
+		_set_hover_ring_visible(false)
+		return
+
+	_ensure_hover_ring()
+	if _hover_ring == null:
 		return
 
 	var hit: Dictionary = _pick_branch_at_mouse()
 	if hit.is_empty():
-		_hover_ring.visible = false
+		_set_hover_ring_visible(false)
 		return
 
 	_update_hover_ring(hit.branch_id, hit.position)
@@ -115,8 +143,8 @@ func handle_prune_input(event: InputEvent) -> bool:
 
 func set_prune_hover_enabled(enabled: bool) -> void:
 	prune_hover_enabled = enabled
-	if not enabled and _hover_ring:
-		_hover_ring.visible = false
+	if not enabled:
+		_set_hover_ring_visible(false)
 
 
 func set_branch_mesh_mode(mode: BranchMeshMode) -> void:
@@ -130,6 +158,13 @@ func set_show_wood_wireframe(enabled: bool) -> void:
 	if show_wood_wireframe == enabled:
 		return
 	show_wood_wireframe = enabled
+	rebuild()
+
+
+func set_show_centerlines(enabled: bool) -> void:
+	if show_centerlines == enabled:
+		return
+	show_centerlines = enabled
 	rebuild()
 
 
@@ -190,6 +225,55 @@ func rebuild() -> void:
 			var node = _graph.nodes[node_id]
 			if not node.children.is_empty():
 				_render_fork_hub(node_id)
+
+	_rebuild_centerlines()
+
+
+func _rebuild_centerlines() -> void:
+	if _centerline_mesh == null:
+		return
+	if not show_centerlines or _graph == null:
+		_centerline_mesh.mesh = null
+		_centerline_mesh.visible = false
+		return
+
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_LINES)
+	for node_id in _graph.nodes.keys():
+		var seg: Dictionary = BranchSegment.from_graph(_graph, node_id)
+		var start: Vector3 = seg.start
+		var end: Vector3 = seg.end
+		if start.distance_squared_to(end) <= MeshConstants.DIR_EPSILON_SQ:
+			continue
+		st.add_vertex(start)
+		st.add_vertex(end)
+
+	_ensure_centerline_material()
+	_centerline_mesh.mesh = st.commit()
+	_centerline_mesh.material_override = _centerline_material
+	_centerline_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_centerline_mesh.visible = true
+
+
+func _move_centerlines_to_front() -> void:
+	if _centerline_root == null:
+		return
+	move_child(_centerline_root, get_child_count() - 1)
+	if _overlay_root != null:
+		move_child(_overlay_root, get_child_count() - 1)
+
+
+func _ensure_centerline_material() -> void:
+	if _centerline_material == null:
+		_centerline_material = StandardMaterial3D.new()
+		_centerline_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_centerline_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_centerline_material.no_depth_test = true
+		_centerline_material.render_priority = 100
+	_centerline_material.albedo_color = centerline_color
+	_centerline_material.emission_enabled = true
+	_centerline_material.emission = centerline_color
+	_centerline_material.emission_energy_multiplier = 0.85
 
 
 func _cleanup_stale_pools(live_ids: Dictionary) -> void:
@@ -267,15 +351,20 @@ func _render_branch(node_id: int) -> void:
 			_render_branch_cylinder(node_id)
 
 
+func _branch_segment(node_id: int) -> Dictionary:
+	return BranchSegment.from_graph(_graph, node_id)
+
+
 func _render_branch_cylinder(node_id: int) -> void:
 	var node = _graph.nodes[node_id]
-	if node.length <= 0.001:
+	if node.length <= MeshConstants.DIST_EPSILON:
 		return
 
-	var start: Vector3 = _graph.get_joint(node_id)
-	var end: Vector3 = _graph.get_world_tip(node_id)
-	var direction: Vector3 = (end - start).normalized()
-	var height: float = maxf(start.distance_to(end), 0.02)
+	var seg := _branch_segment(node_id)
+	var start: Vector3 = seg.start
+	var end: Vector3 = seg.end
+	var direction: Vector3 = seg.direction
+	var height: float = seg.length
 
 	var bottom_radius: float = _get_base_radius(node_id) * thickness_visual_scale
 	var top_radius: float = _get_tip_radius(node_id) * thickness_visual_scale
@@ -296,7 +385,12 @@ func _render_branch_cylinder(node_id: int) -> void:
 	else:
 		_render_tip_disc_cap(node_id, end, direction)
 
-	_update_pick_area(node_id, start, end, node.thickness * thickness_visual_scale)
+	_update_pick_area(
+		node_id,
+		start,
+		end,
+		maxf(_get_base_radius(node_id), _get_tip_radius(node_id)) * thickness_visual_scale
+	)
 	if show_wood_wireframe:
 		_render_wireframe_cylinder(node_id, start, direction, height, bottom_radius, top_radius)
 	_prune_wireframe_pool(node_id, 0, 0, true)
@@ -304,17 +398,16 @@ func _render_branch_cylinder(node_id: int) -> void:
 
 func _render_branch_decimated(node_id: int) -> void:
 	var node = _graph.nodes[node_id]
-	if node.length <= 0.001:
+	if node.length <= MeshConstants.DIST_EPSILON:
 		return
 
-	var start: Vector3 = _graph.get_joint(node_id)
-	var end: Vector3 = _graph.get_world_tip(node_id)
-	var direction: Vector3 = (end - start).normalized()
-	var height: float = maxf(start.distance_to(end), 0.02)
+	var seg := _branch_segment(node_id)
+	var start: Vector3 = seg.start
+	var end: Vector3 = seg.end
+	var direction: Vector3 = seg.direction
+	var height: float = seg.length
 
-	var guide_samples: Array = _scale_sample_radii(
-		_graph.get_bark_guide_samples(node_id, guide_ring_spacing)
-	)
+	var guide_samples: Array = _graph.get_bark_guide_samples(node_id, guide_ring_spacing)
 	if guide_samples.size() < 2:
 		_render_branch_cylinder(node_id)
 		return
@@ -326,13 +419,19 @@ func _render_branch_decimated(node_id: int) -> void:
 		segment_jitter,
 		direction
 	)
+	var include_fork_blend := false
+	for child_id in node.children:
+		if _graph.nodes[child_id].depth > node.depth:
+			include_fork_blend = true
+			break
+
 	var blend_specs: Array = BranchMeshBuilder.build_corner_blend_specs(
 		guide_samples,
 		start,
 		node.id,
 		corner_blend_bend_deg,
 		segment_jitter,
-		not node.children.is_empty(),
+		include_fork_blend,
 		direction
 	)
 
@@ -387,7 +486,12 @@ func _render_branch_decimated(node_id: int) -> void:
 	else:
 		_render_tip_disc_cap(node_id, end, direction)
 
-	_update_pick_area(node_id, start, end, node.thickness * thickness_visual_scale)
+	_update_pick_area(
+		node_id,
+		start,
+		end,
+		maxf(_get_base_radius(node_id), _get_tip_radius(node_id)) * thickness_visual_scale
+	)
 	_prune_branch_chain_pool(node_id, cylinder_specs.size(), blend_specs.size())
 	var wire_chain_count: int = cylinder_specs.size() if show_wood_wireframe else 0
 	var wire_blend_count: int = blend_specs.size() if show_wood_wireframe else 0
@@ -396,17 +500,16 @@ func _render_branch_decimated(node_id: int) -> void:
 
 func _render_branch_skinned(node_id: int) -> void:
 	var node = _graph.nodes[node_id]
-	if node.length <= 0.001:
+	if node.length <= MeshConstants.DIST_EPSILON:
 		return
 
-	var start: Vector3 = _graph.get_joint(node_id)
-	var end: Vector3 = _graph.get_world_tip(node_id)
-	var direction: Vector3 = (end - start).normalized()
-	var height: float = maxf(start.distance_to(end), 0.02)
+	var seg := _branch_segment(node_id)
+	var start: Vector3 = seg.start
+	var end: Vector3 = seg.end
+	var direction: Vector3 = seg.direction
+	var height: float = seg.length
 
-	var guide_samples: Array = _scale_sample_radii(
-		_graph.get_bark_guide_samples(node_id, guide_ring_spacing)
-	)
+	var guide_samples: Array = _graph.get_bark_guide_samples(node_id, guide_ring_spacing)
 	if guide_samples.size() < 2:
 		_render_branch_cylinder(node_id)
 		return
@@ -450,7 +553,12 @@ func _render_branch_skinned(node_id: int) -> void:
 	if node.cut_timestamp >= 0.0:
 		_render_cut_cap(node_id, end, direction)
 
-	_update_pick_area(node_id, start, end, node.thickness * thickness_visual_scale)
+	_update_pick_area(
+		node_id,
+		start,
+		end,
+		maxf(_get_base_radius(node_id), _get_tip_radius(node_id)) * thickness_visual_scale
+	)
 	_prune_branch_chain_pool(node_id, 0, 0)
 	_prune_wireframe_pool(node_id, 0, 0, false)
 
@@ -463,13 +571,21 @@ func _render_fork_hub(parent_id: int) -> void:
 		parent_dir = parent.direction
 	parent_dir = parent_dir.normalized()
 
-	var parent_r: float = _get_tip_radius(parent_id)
+	var parent_r: float = clampf(
+		_get_tip_radius(parent_id) * thickness_visual_scale,
+		MeshConstants.MIN_BRANCH_RADIUS,
+		MAX_VISUAL_RADIUS
+	)
 	var child_specs: Array = []
 	for child_id in parent.children:
 		var child = _graph.nodes[child_id]
-		var child_r: float = _get_base_radius(child_id)
+		var child_r: float = _get_base_radius(child_id) * thickness_visual_scale
 		if child.profile_joint_radius >= 0.0:
-			child_r = child.profile_joint_radius * thickness_visual_scale
+			child_r = clampf(
+				child.profile_joint_radius * thickness_visual_scale,
+				MeshConstants.MIN_BRANCH_RADIUS,
+				MAX_VISUAL_RADIUS
+			)
 		child_specs.append({
 			"dir": child.direction.normalized(),
 			"r": child_r,
@@ -679,9 +795,17 @@ func _get_blend_sphere(blend_key: String) -> MeshInstance3D:
 
 func _build_cylinder(height: float, bottom_radius: float, top_radius: float) -> CylinderMesh:
 	var cylinder := CylinderMesh.new()
-	cylinder.height = maxf(height, 0.02)
-	cylinder.bottom_radius = maxf(bottom_radius, 0.003)
-	cylinder.top_radius = maxf(top_radius, 0.003)
+	cylinder.height = maxf(height, MeshConstants.MIN_BRANCH_HEIGHT)
+	cylinder.bottom_radius = clampf(
+		maxf(bottom_radius, MeshConstants.MIN_BRANCH_RADIUS),
+		MeshConstants.MIN_BRANCH_RADIUS,
+		MAX_VISUAL_RADIUS
+	)
+	cylinder.top_radius = clampf(
+		maxf(top_radius, MeshConstants.MIN_BRANCH_RADIUS),
+		MeshConstants.MIN_BRANCH_RADIUS,
+		MAX_VISUAL_RADIUS
+	)
 	cylinder.radial_segments = maxi(radial_segments, 6)
 	return cylinder
 
@@ -699,6 +823,53 @@ func _get_radius_at_along(node_id: int, along: float) -> float:
 	return _graph.get_radius_at_dist(node_id, along) * thickness_visual_scale
 
 
+func _set_hover_ring_visible(visible: bool) -> void:
+	_ensure_hover_ring()
+	if _hover_ring != null and is_instance_valid(_hover_ring):
+		_hover_ring.visible = visible
+
+
+func _ensure_hover_ring() -> void:
+	if not is_inside_tree():
+		return
+	if _hover_ring != null and is_instance_valid(_hover_ring):
+		return
+
+	if _overlay_root == null or not is_instance_valid(_overlay_root):
+		_overlay_root = get_node_or_null("Overlays") as Node3D
+		if _overlay_root == null:
+			_overlay_root = Node3D.new()
+			_overlay_root.name = "Overlays"
+			add_child(_overlay_root)
+
+	var existing: Node = _overlay_root.get_node_or_null("PruneHoverRing")
+	if existing == null:
+		existing = get_node_or_null("PruneHoverRing")
+	if existing is MeshInstance3D and is_instance_valid(existing):
+		if existing.get_parent() != _overlay_root:
+			existing.reparent(_overlay_root)
+		_hover_ring = existing
+		_hover_ring_mesh = _hover_ring.mesh as TorusMesh
+		if _hover_ring_mesh == null:
+			_hover_ring_mesh = _build_hover_torus_mesh()
+			_hover_ring.mesh = _hover_ring_mesh
+		return
+
+	_hover_ring = _create_hover_ring()
+	if _hover_ring == null or _overlay_root == null or not is_instance_valid(_overlay_root):
+		return
+	_overlay_root.add_child(_hover_ring)
+
+
+func _build_hover_torus_mesh() -> TorusMesh:
+	var torus := TorusMesh.new()
+	torus.inner_radius = HOVER_TORUS_INNER_RADIUS
+	torus.outer_radius = HOVER_TORUS_OUTER_RADIUS
+	torus.rings = 16
+	torus.ring_segments = 24
+	return torus
+
+
 func _create_hover_ring() -> MeshInstance3D:
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.name = "PruneHoverRing"
@@ -710,60 +881,93 @@ func _create_hover_ring() -> MeshInstance3D:
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	material.no_depth_test = true
+	material.render_priority = 100
 	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mesh_instance.material_override = material
 	mesh_instance.visible = false
-	add_child(mesh_instance)
+	_hover_ring_mesh = _build_hover_torus_mesh()
+	mesh_instance.mesh = _hover_ring_mesh
 	return mesh_instance
 
 
-func _update_hover_ring(branch_id: int, local_hit: Vector3) -> void:
-	var start: Vector3 = _graph.get_joint(branch_id)
-	var end: Vector3 = _graph.get_world_tip(branch_id)
-	var branch_dir: Vector3 = (end - start).normalized()
-	var length: float = start.distance_to(end)
-	var along: float = clampf((local_hit - start).dot(branch_dir), 0.02, length)
-	var center: Vector3 = start + branch_dir * along
-	var branch_radius: float = _get_radius_at_along(branch_id, along)
+func _hover_ring_scale(branch_radius: float) -> float:
 	var ring_radius: float = maxf(branch_radius * 1.5, prune_ring_min_radius)
+	var mean_torus_radius: float = (HOVER_TORUS_INNER_RADIUS + HOVER_TORUS_OUTER_RADIUS) * 0.5
+	return ring_radius / mean_torus_radius
 
-	var tube_radius: float = maxf(ring_radius * 0.08, 0.002)
-	var torus := TorusMesh.new()
-	torus.inner_radius = maxf(ring_radius - tube_radius, 0.001)
-	torus.outer_radius = ring_radius + tube_radius
-	torus.rings = 20
-	torus.ring_segments = maxi(radial_segments, 12)
 
-	_hover_ring.mesh = torus
-	_hover_ring.visible = true
-	_orient_ring(_hover_ring, center, branch_dir)
+func _update_hover_ring(branch_id: int, local_hit: Vector3) -> void:
+	_ensure_hover_ring()
+	if _hover_ring == null:
+		return
+
+	var seg := _branch_segment(branch_id)
+	var span: float = seg.start.distance_to(seg.end)
+	if span <= MeshConstants.DIST_EPSILON or seg.direction.length_squared() <= MeshConstants.DIR_EPSILON_SQ:
+		_set_hover_ring_visible(false)
+		return
+
+	var branch_dir: Vector3 = seg.direction
+	var min_along: float = minf(0.02, span * 0.5)
+	var along: float = clampf((local_hit - seg.start).dot(branch_dir), min_along, span)
+	var center: Vector3 = seg.start + branch_dir * along
+	if not local_hit.is_finite() or not center.is_finite():
+		_set_hover_ring_visible(false)
+		return
+
+	var branch_radius: float = maxf(
+		_get_radius_at_along(branch_id, along),
+		MeshConstants.MIN_BRANCH_RADIUS * thickness_visual_scale
+	)
+	if not is_finite(branch_radius):
+		_set_hover_ring_visible(false)
+		return
+
+	var ring_scale: float = _hover_ring_scale(branch_radius)
+	if ring_scale <= 0.0 or not is_finite(ring_scale):
+		_set_hover_ring_visible(false)
+		return
+
+	_set_hover_ring_visible(true)
+	_orient_ring(_hover_ring, center, branch_dir, ring_scale)
 
 
 func _prune_hit_on_branch(branch_id: int, local_hit: Vector3) -> Vector3:
-	var start: Vector3 = _graph.get_joint(branch_id)
-	var end: Vector3 = _graph.get_world_tip(branch_id)
-	var branch_dir: Vector3 = (end - start).normalized()
-	var length: float = start.distance_to(end)
-	var along: float = clampf((local_hit - start).dot(branch_dir), 0.02, length)
-	return start + branch_dir * along
+	return BranchSegment.prune_hit_along(_graph, branch_id, local_hit)
 
 
-func _orient_ring(mesh_instance: MeshInstance3D, center: Vector3, branch_dir: Vector3) -> void:
-	branch_dir = branch_dir.normalized()
-	if branch_dir.length_squared() <= 0.0001:
+func _orient_ring(
+	mesh_instance: MeshInstance3D,
+	center: Vector3,
+	branch_dir: Vector3,
+	uniform_scale: float = 1.0
+) -> void:
+	if not center.is_finite() or not branch_dir.is_finite() or not is_finite(uniform_scale):
+		return
+	if uniform_scale <= 0.0 or uniform_scale > 4.0:
+		return
+	if branch_dir.length_squared() <= MeshConstants.DIR_EPSILON_SQ:
+		return
+
+	var orientation := Vector3Frame.basis_along_direction(branch_dir)
+	if not _basis_is_finite(orientation):
 		return
 
 	mesh_instance.position = center
+	mesh_instance.basis = orientation
+	mesh_instance.scale = Vector3.ONE * uniform_scale
 
-	# TorusMesh lies in the XZ plane with its hole along local Y.
-	# Align local Y to the branch centerline so the ring is perpendicular to it.
-	var ref_up: Vector3 = Vector3.UP
-	if absf(branch_dir.dot(ref_up)) > 0.98:
-		ref_up = Vector3.FORWARD
 
-	var x_axis: Vector3 = ref_up.cross(branch_dir).normalized()
-	var z_axis: Vector3 = branch_dir.cross(x_axis).normalized()
-	mesh_instance.basis = Basis(x_axis, branch_dir, z_axis)
+func _orient_segment(mesh_instance: MeshInstance3D, start: Vector3, direction: Vector3, height: float) -> void:
+	if not start.is_finite() or not direction.is_finite() or not is_finite(height):
+		return
+	if direction.length_squared() <= MeshConstants.DIR_EPSILON_SQ or height <= MeshConstants.DIST_EPSILON:
+		return
+	Vector3Frame.orient_cylinder_mesh(mesh_instance, start, direction, height)
+
+
+func _basis_is_finite(basis: Basis) -> bool:
+	return basis.x.is_finite() and basis.y.is_finite() and basis.z.is_finite()
 
 
 func _pick_branch_at_mouse() -> Dictionary:
@@ -839,13 +1043,14 @@ func _raycast_branch_segment(
 	var t_ray: float
 	var t_axis: float
 	if absf(denom) < 0.0001:
-		t_ray = 0.0
-		t_axis = e / c
+		t_axis = clampf(e / c, 0.0, axis_len)
+		var closest_on_axis: Vector3 = seg_start + axis_dir * t_axis
+		t_ray = ray_dir.dot(closest_on_axis - ray_origin)
 	else:
 		t_ray = (b * e - c * d) / denom
 		t_axis = (a * e - b * d) / denom
 
-	if t_ray < 0.0:
+	if t_ray < 0.01:
 		return {}
 
 	t_axis = clampf(t_axis, 0.0, axis_len)
@@ -886,17 +1091,6 @@ func _render_tip_disc_cap(node_id: int, end: Vector3, direction: Vector3) -> voi
 	cap.position = end
 	cap.basis = Basis.IDENTITY
 	cap.material_override = graft_material if node.is_graft else trunk_material
-
-
-func _orient_segment(mesh_instance: MeshInstance3D, start: Vector3, direction: Vector3, height: float) -> void:
-	if direction.length_squared() <= 0.0001:
-		return
-	mesh_instance.position = start + direction * (height * 0.5)
-	var up: Vector3 = Vector3.UP
-	if absf(direction.dot(up)) > 0.98:
-		up = Vector3.FORWARD
-	mesh_instance.basis = Basis.looking_at(direction, up)
-	mesh_instance.rotate_object_local(Vector3.RIGHT, -PI * 0.5)
 
 
 func _get_segment(node_id: int) -> MeshInstance3D:
@@ -955,12 +1149,8 @@ func _update_pick_area(node_id: int, start: Vector3, end: Vector3, thickness: fl
 	var direction := (end - start).normalized()
 	var height := start.distance_to(end)
 	area.position = midpoint
-	if direction.length_squared() > 0.0001:
-		var up: Vector3 = Vector3.UP
-		if absf(direction.dot(up)) > 0.98:
-			up = Vector3.FORWARD
-		area.basis = Basis.looking_at(direction, up)
-		area.rotate_object_local(Vector3.RIGHT, -PI * 0.5)
+	if direction.length_squared() > MeshConstants.DIR_EPSILON_SQ:
+		area.basis = Vector3Frame.basis_along_direction(direction)
 	var collision_shape: CollisionShape3D = area.get_node("Collision")
 	var capsule: CapsuleShape3D = collision_shape.shape
 	capsule.radius = maxf(thickness, 0.02)

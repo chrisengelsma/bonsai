@@ -1,0 +1,10 @@
+class_name MeshConstants
+extends RefCounted
+
+const MIN_BRANCH_HEIGHT := 0.02
+const MIN_BRANCH_RADIUS := 0.003
+const MIN_CYLINDER_SEGMENT_LENGTH := 0.004
+const DIST_EPSILON := 0.001
+const DIR_EPSILON_SQ := 0.0001
+const PARALLEL_DOT_THRESHOLD := 0.92
+const ORIENT_PARALLEL_DOT_THRESHOLD := 0.98

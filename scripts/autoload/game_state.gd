@@ -28,7 +28,9 @@ var camera_pitch: float = 30.0
 var camera_distance: float = 3.0
 var tool_mode: int = 0
 var show_skeleton: bool = false
-var show_roots: bool = true
+const ROOTS_ENABLED := false
+
+var show_roots: bool = false
 
 var _is_watering: bool = false
 var _water_cooldown: float = 0.0
@@ -103,7 +105,7 @@ func load_from_save(data: Dictionary) -> void:
 	grow_speed_multiplier = float(data.get("grow_speed_multiplier", 1.0))
 	music_enabled = bool(data.get("music_enabled", true))
 	ambience_enabled = bool(data.get("ambience_enabled", true))
-	show_roots = bool(data.get("show_roots", true))
+	show_roots = bool(data.get("show_roots", false)) if ROOTS_ENABLED else false
 	camera_yaw = float(data.get("camera_yaw", 0.0))
 	camera_pitch = float(data.get("camera_pitch", 30.0))
 	camera_distance = float(data.get("camera_distance", 3.0))
@@ -186,6 +188,8 @@ func set_show_skeleton(enabled: bool) -> void:
 
 
 func set_show_roots(enabled: bool) -> void:
+	if not ROOTS_ENABLED:
+		enabled = false
 	if show_roots == enabled:
 		return
 	show_roots = enabled

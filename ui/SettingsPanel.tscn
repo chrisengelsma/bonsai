@@ -4,7 +4,7 @@
 [ext_resource type="Theme" path="res://ui/bonsai_theme.tres" id="2"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
-bg_color = Color(0.96, 0.93, 0.87, 0.95)
+bg_color = Color(0.99, 0.98, 0.96, 0.98)
 corner_radius_top_left = 16
 corner_radius_top_right = 16
 corner_radius_bottom_right = 16
@@ -32,7 +32,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.1, 0.08, 0.06, 0.35)
+color = Color(0.72, 0.7, 0.66, 0.28)
 
 [node name="Center" type="CenterContainer" parent="."]
 layout_mode = 1
@@ -70,6 +70,19 @@ max_value = 8.0
 step = 0.1
 value = 1.0
 
+[node name="CameraDistanceLabel" type="Label" parent="Center/Panel/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Camera distance: 3.0"
+
+[node name="CameraDistanceSlider" type="HSlider" parent="Center/Panel/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 1.0
+max_value = 15.0
+step = 0.1
+value = 3.0
+
 [node name="MusicCheck" type="CheckBox" parent="Center/Panel/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -104,7 +117,7 @@ text = "Reset Tree"
 [node name="LabButton" type="Button" parent="Center/Panel/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
-text = "L-System Lab"
+text = "Tree Lab"
 
 [node name="CloseButton" type="Button" parent="Center/Panel/VBox"]
 unique_name_in_owner = true

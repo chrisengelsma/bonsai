@@ -1,6 +1,8 @@
 extends Node3D
 class_name RootRenderer
 
+const Vector3Frame = preload("res://scripts/util/vector3_frame.gd")
+
 @export var line_color: Color = Color(1.0, 0.12, 0.08, 1.0)
 @export var line_radius: float = 0.00085
 @export var smooth_samples_per_segment: int = 3
@@ -8,7 +10,7 @@ class_name RootRenderer
 const MIN_SEGMENT_LENGTH := 0.00008
 const MAX_SEGMENT_LENGTH := 0.05
 
-var show_roots: bool = true
+var show_roots: bool = false
 
 var _graph
 var _multimesh_instance: MultiMeshInstance3D
@@ -164,18 +166,4 @@ func _smooth_polyline(points: PackedVector3Array) -> PackedVector3Array:
 
 
 func _segment_transform(start: Vector3, end: Vector3) -> Transform3D:
-	var delta: Vector3 = end - start
-	var length: float = delta.length()
-	if length <= MIN_SEGMENT_LENGTH:
-		return Transform3D(Basis.IDENTITY.scaled(Vector3.ZERO), start)
-
-	var direction: Vector3 = delta / length
-	var up: Vector3 = Vector3.UP
-	if absf(direction.dot(up)) > 0.98:
-		up = Vector3.FORWARD
-
-	var basis: Basis = Basis.looking_at(direction, up)
-	basis = basis * Basis.from_euler(Vector3(-PI * 0.5, 0.0, 0.0))
-	var radius_scale: float = line_radius * 2.0
-	basis = basis.scaled(Vector3(radius_scale, length, radius_scale))
-	return Transform3D(basis, start + direction * (length * 0.5))
+	return Vector3Frame.cylinder_transform(start, end, line_radius * 2.0)

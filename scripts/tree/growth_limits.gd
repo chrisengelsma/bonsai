@@ -13,6 +13,8 @@ const MAX_TRUNK_LENGTH := 0.95
 const MAX_PRIMARY_LENGTH := 0.55
 const MAX_SECONDARY_LENGTH := 0.38
 const MAX_TWIG_LENGTH := 0.28
+const MAX_TRUNK_THICKNESS_MULT := 1.7
+const MAX_BRANCH_THICKNESS_MULT := 1.45
 
 const MIN_SEGMENT_LENGTH := 0.045
 const MAX_SEGMENT_LENGTH := 0.14
@@ -45,6 +47,12 @@ static func clamp_pattern(pattern) -> void:
 	pattern.spatial_spread_deg = clampf(pattern.spatial_spread_deg, 0.0, 28.0)
 	pattern.cambium_growth_rate = clampf(pattern.cambium_growth_rate, 0.0, 0.004)
 	pattern.ring_sample_spacing = clampf(pattern.ring_sample_spacing, 0.012, 0.06)
+	pattern.apical_dominance = clampf(pattern.apical_dominance, 0.0, 1.0)
+	pattern.auxin_source_strength = clampf(pattern.auxin_source_strength, 0.1, 2.5)
+	pattern.auxin_decay = clampf(pattern.auxin_decay, 0.2, 0.95)
+	pattern.pipe_exponent = clampf(pattern.pipe_exponent, 1.5, 3.0)
+	pattern.segment_taper_power = clampf(pattern.segment_taper_power, 0.7, 2.0)
+	pattern.terminal_taper_ratio = clampf(pattern.terminal_taper_ratio, 0.35, 0.95)
 
 
 static func max_length_for_depth(depth: int) -> float:
@@ -59,6 +67,12 @@ static func max_length_for_depth(depth: int) -> float:
 			return MAX_TWIG_LENGTH
 
 
+static func max_radius_for_depth(depth: int, pattern) -> float:
+	var base: float = pattern.trunk_thickness if depth == 0 else pattern.branch_thickness
+	var mult: float = MAX_TRUNK_THICKNESS_MULT if depth == 0 else MAX_BRANCH_THICKNESS_MULT
+	return base * mult
+
+
 static func can_add_node(current_count: int) -> bool:
 	return current_count < MAX_TOTAL_NODES
 
@@ -69,3 +83,7 @@ static func clamp_game_grow_speed(value: float) -> float:
 
 static func clamp_lab_grow_speed(value: float) -> float:
 	return clampf(value, 0.5, MAX_LAB_GROW_SPEED)
+
+
+static func initial_child_length(pattern) -> float:
+	return maxf(pattern.lsystem_segment_length * 0.32, 0.042)

@@ -5,7 +5,7 @@ extends "res://scripts/orbit_camera.gd"
 
 func _ready() -> void:
 	super._ready()
-	distance = 5.0
+	distance = 3.0
 
 
 func _can_orbit() -> bool:

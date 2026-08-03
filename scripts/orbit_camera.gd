@@ -8,8 +8,8 @@ const MobileUtils = preload("res://scripts/platform/mobile_utils.gd")
 
 @export var target_path: NodePath
 var target: Node3D
-@export var min_distance: float = 1.8
-@export var max_distance: float = 4.5
+@export var min_distance: float = 1.0
+@export var max_distance: float = 15.0
 @export var orbit_sensitivity: float = 1.0
 @export var pan_sensitivity: float = 1.0
 @export var zoom_sensitivity: float = 0.15
@@ -18,6 +18,8 @@ var target: Node3D
 @export var look_target_height: float = 0.15
 @export var min_pitch_deg: float = 0.0
 @export var max_pitch_deg: float = 89.0
+
+signal distance_changed(value: float)
 
 var distance: float = 3.0
 var orbit_yaw: float = 0.0
@@ -57,7 +59,7 @@ func _ready() -> void:
 		zoom_sensitivity = 0.2
 		touch_drag_threshold = 10.0
 
-	distance = GameState.camera_distance
+	distance = clampf(GameState.camera_distance, min_distance, max_distance)
 	orbit_yaw = GameState.camera_yaw
 	orbit_pitch = _load_pitch(GameState.camera_pitch)
 	_clamp_pitch()
@@ -206,7 +208,11 @@ func _clamp_pitch() -> void:
 
 
 func _apply_zoom(amount: float) -> void:
+	var previous: float = distance
 	distance = clampf(distance + amount, min_distance, max_distance)
+	if not is_equal_approx(previous, distance):
+		distance_changed.emit(distance)
+	_update_camera()
 	_save_camera_state()
 
 
@@ -224,7 +230,10 @@ func _apply_pinch_zoom() -> void:
 	if _pinch_start_distance <= 0.0 or current_distance <= 0.0:
 		return
 	var ratio: float = _pinch_start_distance / current_distance
+	var previous: float = distance
 	distance = clampf(_pinch_start_zoom * ratio, min_distance, max_distance)
+	if not is_equal_approx(previous, distance):
+		distance_changed.emit(distance)
 
 
 func _process(delta: float) -> void:
@@ -267,10 +276,33 @@ func _spherical_offset(yaw_deg: float, pitch_deg: float, radius: float) -> Vecto
 
 
 func _update_camera() -> void:
+	if not is_finite(distance):
+		distance = clampf(distance, min_distance, max_distance)
+		if not is_finite(distance):
+			distance = min_distance
+
 	var look_target: Vector3 = _get_look_target()
 	var offset: Vector3 = _spherical_offset(orbit_yaw, orbit_pitch, distance)
+	if not look_target.is_finite() or not offset.is_finite():
+		return
 	global_position = look_target + offset
 	look_at(look_target, Vector3.UP)
+
+
+func set_camera_distance(value: float) -> void:
+	if not is_finite(value):
+		return
+	var next_distance: float = clampf(value, min_distance, max_distance)
+	if is_equal_approx(distance, next_distance):
+		return
+	distance = next_distance
+	_update_camera()
+	_save_camera_state()
+	distance_changed.emit(distance)
+
+
+func get_camera_distance() -> float:
+	return distance
 
 
 func _load_pitch(saved_pitch: float) -> float:

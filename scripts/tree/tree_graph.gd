@@ -4,7 +4,14 @@ extends RefCounted
 const BranchNodeClass = preload("res://scripts/tree/branch_node.gd")
 const LSystemInterpreter = preload("res://scripts/tree/lsystem_interpreter.gd")
 const GrowthLimits = preload("res://scripts/tree/growth_limits.gd")
+const GrowthStep = preload("res://scripts/tree/growth_step.gd")
 const SpatialGrowth = preload("res://scripts/tree/spatial_growth.gd")
+const AxialChain = preload("res://scripts/tree/axial_chain.gd")
+const LSystemSymbols = preload("res://scripts/tree/lsystem_symbols.gd")
+const MathUtils = preload("res://scripts/util/math_utils.gd")
+const Vector3Frame = preload("res://scripts/util/vector3_frame.gd")
+const AuxinModel = preload("res://scripts/tree/auxin_model.gd")
+const PipeTaper = preload("res://scripts/tree/pipe_taper.gd")
 
 const JOINT_COLLAR_LENGTH_FRAC := 0.38
 const FORK_TAPER_MIN_LENGTH := 0.038
@@ -17,8 +24,14 @@ var root_id: int = -1
 var next_id: int = 0
 var species_id: String = ""
 var _thickness_falloff: float = 0.72
+var _use_pipe_taper: bool = true
+var _pipe_exponent: float = 2.0
+var _segment_taper_power: float = 1.12
+var _terminal_taper_ratio: float = 0.58
+var _growth_pattern = null
 var _rng := RandomNumberGenerator.new()
 var _allow_prune_spawn: bool = false
+var _auxin_levels: Dictionary = {}
 
 const PATH_RADIUS_DECAY := 2.05
 
@@ -36,16 +49,29 @@ func clear() -> void:
 func create_from_species(species) -> void:
 	clear()
 	species_id = species.id
-	if species.grow_pattern:
-		_thickness_falloff = species.grow_pattern.thickness_falloff
+	var pattern = species.grow_pattern if species.grow_pattern else null
+	if pattern:
+		_thickness_falloff = pattern.thickness_falloff
+		_growth_pattern = pattern
 	if species.starter_graph.is_empty():
-		_create_default_starter(species)
+		_create_default_starter(species, pattern)
 	else:
 		from_dict(species.starter_graph)
 
 
-func _create_default_starter(species) -> void:
-	var pattern = species.grow_pattern
+func create_from_lab_pattern(species, pattern) -> void:
+	clear()
+	species_id = species.id
+	if pattern:
+		_thickness_falloff = pattern.thickness_falloff
+		_growth_pattern = pattern
+		_growth_pattern = pattern
+	_create_default_starter(species, pattern)
+
+
+func _create_default_starter(species, pattern) -> void:
+	if pattern == null:
+		pattern = species.grow_pattern
 	var root_thickness: float = pattern.trunk_thickness
 	if species.id == "ginseng_ficus":
 		root_thickness *= 1.15
@@ -100,49 +126,62 @@ func grow(delta: float, pattern, moisture_ok: bool, speed_mult: float, soil_mult
 
 	GrowthLimits.clamp_pattern(pattern)
 	_thickness_falloff = pattern.thickness_falloff
+	_sync_pipe_taper_settings(pattern)
+	_update_auxin(pattern)
 	_enforce_active_tip_budget()
 	var over_height: bool = _is_over_height_limit()
 
 	var now = Time.get_ticks_msec() / 1000.0
 	_process_regrowth(now, pattern, delta)
 
-	var tip_ids = _get_active_tip_ids()
-	for tip_id in tip_ids:
-		var tip = nodes[tip_id]
-		if tip.freeze_length:
-			continue
-		if over_height:
-			tip.is_growing_tip = false
-			continue
-
-		var max_length: float = GrowthLimits.max_length_for_depth(tip.depth)
-		if tip.length >= max_length:
-			tip.is_growing_tip = false
-			continue
-
-		tip.age += delta
-		var growth_amount: float = pattern.tip_growth_rate * delta * speed_mult * soil_mult * tip.growth_energy
-		tip.length = minf(tip.length + growth_amount, max_length)
-
-		if pattern.gravity_curve != 0.0 and tip.stochastic_direction:
-			var gravity = Vector3(0.0, -pattern.gravity_curve * delta, 0.0)
-			tip.direction = (tip.direction + gravity).normalized()
-
-		if pattern.foliage_style != "none" and tip.length >= pattern.foliage_start_length:
-			tip.foliage_amount = minf(1.0, tip.foliage_amount + pattern.foliage_growth_rate * delta)
-
-		_accumulate_cambium_on_path(tip_id, delta, pattern)
-		_update_branch_profile(tip, pattern)
-
-		var segment_length: float = _segment_length_for_tip(tip, pattern)
-		if tip.length - tip.length_at_last_production >= segment_length:
-			if pattern.use_lsystem:
-				LSystemInterpreter.apply_at_tip(self, tip_id, pattern)
-			elif _should_random_bud(tip, pattern, delta):
-				_bud_child_random(tip_id, pattern)
-			tip.next_segment_length = -1.0
+	GrowthStep.process_active_tips(self, pattern, {
+		"mode": "continuous",
+		"delta": delta,
+		"speed_mult": speed_mult,
+		"soil_mult": soil_mult,
+		"over_height": over_height,
+	})
 
 	graph_changed.emit()
+
+
+func _update_auxin(pattern) -> void:
+	AuxinModel.recompute(self, pattern)
+
+
+func _sync_pipe_taper_settings(pattern) -> void:
+	_growth_pattern = pattern
+	_use_pipe_taper = bool(pattern.use_pipe_taper)
+	_pipe_exponent = pattern.pipe_exponent
+	_segment_taper_power = pattern.segment_taper_power
+	_terminal_taper_ratio = pattern.terminal_taper_ratio
+
+
+func _max_render_radius(node) -> float:
+	if _growth_pattern == null:
+		return 0.12
+	return GrowthLimits.max_radius_for_depth(node.depth, _growth_pattern)
+
+
+func _clamp_render_radius(node, radius: float) -> float:
+	if not is_finite(radius):
+		return _max_render_radius(node)
+	return minf(maxf(radius, 0.0035), _max_render_radius(node))
+
+
+func _parent_exterior_at_tip(parent_id: int) -> float:
+	if not nodes.has(parent_id):
+		return 0.02
+	var parent = nodes[parent_id]
+	return _clamp_render_radius(parent, get_radius_at_dist(parent_id, parent.length))
+
+
+func get_auxin(node_id: int) -> float:
+	return float(_auxin_levels.get(node_id, 0.0))
+
+
+func get_tip_growth_multiplier(tip_id: int, pattern) -> float:
+	return AuxinModel.tip_growth_multiplier(self, tip_id, pattern)
 
 
 func _should_random_bud(tip, pattern, delta: float) -> bool:
@@ -173,21 +212,12 @@ func _process_regrowth(now: float, pattern, delta: float) -> void:
 			var child = bud_lsystem_child(
 				node_id,
 				new_dir,
-				_lateral_regrowth_symbol(pattern),
+				LSystemSymbols.lateral_regrowth_symbol(pattern),
 				pattern
 			)
 			if child:
 				node.cut_timestamp = -1.0
 				node.is_growing_tip = false
-
-
-func _lateral_regrowth_symbol(pattern) -> String:
-	var rules = pattern.get_lsystem_rules()
-	if rules.has("S"):
-		return "S"
-	if rules.has("B"):
-		return "B"
-	return pattern.lsystem_axiom
 
 
 func bud_lsystem_child(
@@ -212,7 +242,7 @@ func bud_lsystem_child(
 
 	var child = _create_node(parent_id, direction, thickness, parent.depth + 1)
 	child.base_thickness = thickness
-	child.length = maxf(pattern.lsystem_segment_length * 0.32, 0.042)
+	child.length = GrowthLimits.initial_child_length(pattern)
 	child.is_growing_tip = true
 	child.lsymbol = lsymbol
 	child.length_at_last_production = child.length
@@ -230,21 +260,30 @@ func continue_growth_segment(
 	turtle_up: Vector3,
 	lsymbol: String,
 	pattern
-) -> void:
+) -> bool:
 	if not nodes.has(parent_id):
-		return
+		return false
 	if not GrowthLimits.can_add_node(nodes.size()):
-		return
+		return false
 
 	var parent = nodes[parent_id]
+	var future_chain: float = parent.length + AxialChain.chain_at_joint(nodes, parent_id)
+	var depth_cap: float = GrowthLimits.max_length_for_depth(parent.depth)
+	var child_budget: float = depth_cap - future_chain
+	if child_budget <= 0.001:
+		return false
+
 	parent.is_growing_tip = false
 	parent.freeze_length = true
 	_extend_tip_sample(parent)
 
-	var thickness: float = _parent_tip_radius(parent_id)
+	var thickness: float = minf(
+		_parent_tip_radius(parent_id),
+		GrowthLimits.max_radius_for_depth(parent.depth, pattern)
+	)
 	var child = _create_node(parent_id, direction, thickness, parent.depth)
 	child.base_thickness = thickness
-	child.length = maxf(pattern.lsystem_segment_length * 0.32, 0.042)
+	child.length = minf(GrowthLimits.initial_child_length(pattern), child_budget)
 	child.is_growing_tip = true
 	child.lsymbol = lsymbol
 	child.length_at_last_production = child.length
@@ -252,6 +291,7 @@ func continue_growth_segment(
 	child.growth_energy = _roll_growth_energy(pattern)
 	child.stochastic_direction = parent.stochastic_direction
 	_setup_axial_continuation_profile(parent, child)
+	return true
 
 
 func _setup_axial_continuation_profile(parent, child) -> void:
@@ -260,7 +300,7 @@ func _setup_axial_continuation_profile(parent, child) -> void:
 
 	var child_dir: Vector3 = child.direction.normalized()
 	child.profile_frame_right = Vector3.ZERO
-	child.profile_joint_radius = get_radius_at_dist(parent.id, parent.length)
+	child.profile_joint_radius = _parent_exterior_at_tip(parent.id)
 	child.locked_wobble = parent.locked_wobble.duplicate()
 	child.last_profile_direction = child_dir
 	child.last_ring_sample_dist = 0.0
@@ -283,10 +323,8 @@ func _bud_child_random(parent_id: int, pattern) -> bool:
 	var angle_deg = _rng.randf_range(pattern.branch_angle_range.x, pattern.branch_angle_range.y)
 	if _rng.randf() > 0.5:
 		angle_deg = -angle_deg
-	var axis = parent.direction.cross(Vector3.UP)
-	if axis.length_squared() < 0.001:
-		axis = Vector3.RIGHT
-	var child_dir = parent.direction.rotated(axis.normalized(), deg_to_rad(angle_deg)).normalized()
+	var axis: Vector3 = Vector3Frame.safe_tangent_axis(parent.direction)
+	var child_dir = parent.direction.rotated(axis, deg_to_rad(angle_deg)).normalized()
 	return bud_lsystem_child(parent_id, child_dir, "S", pattern) != null
 
 
@@ -327,7 +365,7 @@ func _setup_child_joint_profile(parent, child) -> void:
 	var fork_angle: float = exit_dir.angle_to(child_dir)
 
 	child.profile_frame_right = exit_right
-	child.profile_joint_radius = get_radius_at_dist(parent.id, parent.length)
+	child.profile_joint_radius = _parent_exterior_at_tip(parent.id)
 	child.locked_wobble = parent.locked_wobble.duplicate()
 	child.last_profile_direction = child_dir
 
@@ -380,10 +418,25 @@ func _fork_taper_length(node) -> float:
 	return maxf(node.length * FORK_TAPER_LENGTH_FRAC, FORK_TAPER_MIN_LENGTH)
 
 
+func has_lateral_children(node_id: int) -> bool:
+	if not nodes.has(node_id):
+		return false
+	return _has_lateral_children(nodes[node_id])
+
+
+func _has_lateral_children(node) -> bool:
+	for child_id in node.children:
+		if nodes[child_id].depth > node.depth:
+			return true
+	return false
+
+
 func _fork_tip_radius(parent) -> float:
 	var fork_radius: float = 0.0
 	for child_id in parent.children:
 		var child = nodes[child_id]
+		if child.depth <= parent.depth:
+			continue
 		var child_core: float = child.base_thickness + child.cambium_thickness
 		fork_radius = maxf(fork_radius, child_core * 0.96)
 	var parent_core: float = parent.base_thickness + parent.cambium_thickness
@@ -397,16 +450,15 @@ func _update_parent_fork_profile(parent) -> void:
 		return
 
 	ensure_profile_render_ready(parent)
+
+	if not _has_lateral_children(parent):
+		return
+
 	var fork_len: float = _fork_taper_length(parent)
 	var fork_start: float = maxf(parent.length - fork_len, 0.0)
 	_ensure_sample_at_dist(parent, fork_start, parent.last_profile_direction)
 	_extend_tip_sample(parent)
 	_refresh_ring_sample_radii(parent)
-
-	var tip_radius: float = get_radius_at_dist(parent.id, parent.length)
-	for child_id in parent.children:
-		var child = nodes[child_id]
-		child.profile_joint_radius = tip_radius
 
 
 func _ensure_sample_at_dist(node, dist: float, direction: Vector3) -> void:
@@ -414,10 +466,6 @@ func _ensure_sample_at_dist(node, dist: float, direction: Vector3) -> void:
 		if sample is Dictionary and absf(float(sample.get("dist", -1.0)) - dist) < 0.001:
 			return
 	_append_frozen_sample(node, dist, direction)
-
-
-func _smoothstep(t: float) -> float:
-	return t * t * (3.0 - 2.0 * t)
 
 
 func get_radius_at_dist(node_id: int, dist: float) -> float:
@@ -434,9 +482,25 @@ func _path_distance_from_root(node_id: int, dist_along: float) -> float:
 		if node.parent_id < 0:
 			break
 		var parent = nodes[node.parent_id]
-		total += maxf(parent.length, 0.02)
+		total += parent.length
 		current_id = node.parent_id
 	return total
+
+
+func _axial_chain_length_at_joint(node_id: int) -> float:
+	return AxialChain.chain_at_joint(nodes, node_id)
+
+
+func _axial_chain_total(node_id: int) -> float:
+	return AxialChain.chain_total(nodes, node_id)
+
+
+func _remaining_axial_budget(node_id: int) -> float:
+	return AxialChain.remaining_budget(nodes, node_id)
+
+
+func _length_budget_for_tip(node_id: int) -> float:
+	return AxialChain.length_budget_for_tip(nodes, node_id)
 
 
 func _root_core_radius() -> float:
@@ -450,23 +514,51 @@ func _segment_base_radius(node) -> float:
 	var core_radius: float = node.base_thickness + node.cambium_thickness
 	var min_radius: float = maxf(core_radius * 0.38, 0.0035)
 
+	# Match the parent exit radius at joints so segments taper continuously
+	# instead of re-thickening into stacked cones.
+	if node.profile_joint_radius > 0.0:
+		return maxf(_clamp_render_radius(node, node.profile_joint_radius), min_radius)
+
 	var path_from_root: float = _path_distance_from_root(node.id, 0.0)
 	var trunk_radius: float = _root_core_radius()
 	var path_radius: float = trunk_radius * exp(-path_from_root * PATH_RADIUS_DECAY)
 	path_radius *= pow(_thickness_falloff, float(node.depth) * 0.42)
 	path_radius = maxf(path_radius, min_radius)
 
-	var base_radius: float = maxf(core_radius, path_radius)
-	if node.profile_joint_radius > 0.0:
-		base_radius = maxf(base_radius, node.profile_joint_radius)
-	return base_radius
+	return _clamp_render_radius(node, maxf(core_radius, path_radius))
 
 
 func _segment_tip_radius(node, base_radius: float) -> float:
 	var core_radius: float = node.base_thickness + node.cambium_thickness
 	var min_radius: float = maxf(core_radius * 0.38, 0.0035)
+
+	if _use_pipe_taper:
+		var child_radii: Array = _child_pipe_radii(node)
+		if child_radii.is_empty():
+			return _clamp_render_radius(
+				node,
+				PipeTaper.terminal_tip_radius(base_radius, _terminal_taper_ratio)
+			)
+		return _clamp_render_radius(
+			node,
+			maxf(PipeTaper.combine_child_radii(child_radii, _pipe_exponent), min_radius)
+		)
+
 	var tip_radius: float = maxf(core_radius * 0.72, min_radius)
-	return minf(tip_radius, base_radius * 0.92)
+	return _clamp_render_radius(node, minf(tip_radius, base_radius * 0.92))
+
+
+func _child_pipe_radii(node) -> Array:
+	var radii: Array = []
+	for child_id in node.children:
+		if not nodes.has(child_id):
+			continue
+		var child = nodes[child_id]
+		if child.depth <= node.depth:
+			continue
+		var pipe_r: float = maxf(child.base_thickness + child.cambium_thickness, 0.0035)
+		radii.append(_clamp_render_radius(child, pipe_r))
+	return radii
 
 
 func _radius_at_dist(node, dist: float) -> float:
@@ -476,13 +568,26 @@ func _radius_at_dist(node, dist: float) -> float:
 	if node.prune_cut_radius > 0.0:
 		var joint_radius: float = _segment_base_radius(node)
 		var cut_radius: float = minf(node.prune_cut_radius, joint_radius)
-		return lerpf(joint_radius, cut_radius, _smoothstep(pow(local_t, 0.9)))
+		return _clamp_render_radius(
+			node,
+			lerpf(joint_radius, cut_radius, MathUtils.smoothstep(pow(local_t, 0.9)))
+		)
 
 	var base_radius: float = _segment_base_radius(node)
 	var tip_radius: float = _segment_tip_radius(node, base_radius)
-	var radius: float = lerpf(base_radius, tip_radius, _smoothstep(pow(local_t, 0.9)))
 
-	if not node.children.is_empty():
+	if _use_pipe_taper:
+		return _clamp_render_radius(
+			node,
+			maxf(
+				PipeTaper.segment_radius(base_radius, tip_radius, local_t, _segment_taper_power),
+				maxf(base_radius * 0.35, 0.0035)
+			)
+		)
+
+	var radius: float = lerpf(base_radius, tip_radius, MathUtils.smoothstep(pow(local_t, 0.9)))
+
+	if _has_lateral_children(node):
 		var fork_len: float = minf(_fork_taper_length(node), length * 0.85)
 		var fork_start: float = maxf(length - fork_len, 0.0)
 		if dist >= fork_start:
@@ -492,9 +597,9 @@ func _radius_at_dist(node, dist: float) -> float:
 				1.0
 			)
 			var fork_radius: float = minf(_fork_tip_radius(node), base_radius * 0.88)
-			radius = lerpf(radius, fork_radius, _smoothstep(fork_t) * 0.45)
+			radius = lerpf(radius, fork_radius, MathUtils.smoothstep(fork_t) * 0.45)
 
-	return maxf(radius, maxf(base_radius * 0.35, 0.0035))
+	return _clamp_render_radius(node, maxf(radius, maxf(base_radius * 0.35, 0.0035)))
 
 
 func _append_frozen_sample(node, dist: float, direction: Vector3) -> void:
@@ -624,6 +729,14 @@ func _accumulate_cambium_on_path(node_id: int, delta: float, pattern) -> void:
 	var current_id: int = node_id
 	while nodes.has(current_id):
 		var node = nodes[current_id]
+		var max_radius: float = _max_radius_for_node(node, pattern)
+		var current_radius: float = node.base_thickness + node.cambium_thickness
+		if current_radius >= max_radius:
+			if node.parent_id < 0:
+				break
+			current_id = node.parent_id
+			continue
+
 		var rate: float = pattern.cambium_growth_rate * delta * node.growth_energy
 		if node.depth == 0:
 			rate *= 1.45
@@ -631,10 +744,7 @@ func _accumulate_cambium_on_path(node_id: int, delta: float, pattern) -> void:
 			rate *= pow(pattern.thickness_falloff, float(node.depth) * 0.42)
 
 		node.cambium_thickness += rate
-		node.thickness = minf(
-			node.base_thickness + node.cambium_thickness,
-			_max_radius_for_node(node, pattern)
-		)
+		node.thickness = minf(node.base_thickness + node.cambium_thickness, max_radius)
 
 		if node.parent_id < 0:
 			break
@@ -642,8 +752,7 @@ func _accumulate_cambium_on_path(node_id: int, delta: float, pattern) -> void:
 
 
 func _max_radius_for_node(node, pattern) -> float:
-	var target: float = pattern.trunk_thickness if node.depth == 0 else pattern.branch_thickness
-	return target * (1.0 + node.age * 0.05) + node.cambium_thickness * 0.35
+	return GrowthLimits.max_radius_for_depth(node.depth, pattern)
 
 
 func _refresh_ring_sample_radii(node) -> void:
@@ -753,6 +862,21 @@ func prune_at_point(branch_id: int, local_hit: Vector3, sole_seed: bool = false)
 	return true
 
 
+func pinch_tip(branch_id: int) -> bool:
+	if not nodes.has(branch_id):
+		return false
+
+	var node = nodes[branch_id]
+	if not node.is_growing_tip:
+		return false
+
+	node.is_growing_tip = false
+	node.prune_seed_pending = true
+	node.cut_timestamp = -1.0
+	graph_changed.emit()
+	return true
+
+
 func sprout_prune_seeds(pattern) -> int:
 	GrowthLimits.clamp_pattern(pattern)
 	_thickness_falloff = pattern.thickness_falloff
@@ -802,10 +926,7 @@ func _bud_prune_fallback(parent_id: int, pattern) -> int:
 
 	var parent = nodes[parent_id]
 	var symbol: String = _lateral_prune_symbol(parent.lsymbol, pattern)
-	var axis: Vector3 = parent.direction.cross(Vector3.UP)
-	if axis.length_squared() < 0.001:
-		axis = Vector3.RIGHT
-	axis = axis.normalized()
+	var axis: Vector3 = Vector3Frame.safe_tangent_axis(parent.direction)
 
 	var spawned: int = 0
 	var angle_rad: float = deg_to_rad(pattern.lsystem_angle_deg)
@@ -819,47 +940,22 @@ func _bud_prune_fallback(parent_id: int, pattern) -> int:
 
 
 func _lateral_prune_symbol(parent_symbol: String, pattern) -> String:
-	var production: String = pattern.get_production(parent_symbol)
-	for i in production.length():
-		var symbol: String = production[i]
-		if symbol.length() != 1:
-			continue
-		var code: int = symbol.unicode_at(0)
-		if code >= 65 and code <= 90 and symbol != "F":
-			return symbol
-	return _lateral_regrowth_symbol(pattern)
+	var symbol: String = LSystemSymbols.first_lateral_symbol(pattern.get_production(parent_symbol))
+	if not symbol.is_empty():
+		return symbol
+	return LSystemSymbols.lateral_regrowth_symbol(pattern)
 
 
 func advance_lab_step(pattern, speed_mult: float = 1.0) -> void:
 	GrowthLimits.clamp_pattern(pattern)
 	_thickness_falloff = pattern.thickness_falloff
-
-	for tip_id in _get_active_tip_ids():
-		var tip = nodes[tip_id]
-		if tip.depth >= pattern.max_branch_depth:
-			tip.is_growing_tip = false
-			continue
-
-		var max_length: float = GrowthLimits.max_length_for_depth(tip.depth)
-		var segment_length: float = _segment_length_for_tip(tip, pattern)
-		var since_production: float = tip.length - tip.length_at_last_production
-		var growth_needed: float = maxf(segment_length - since_production, segment_length * 0.25)
-		tip.length = minf(tip.length + growth_needed * speed_mult, max_length)
-
-		if pattern.gravity_curve != 0.0 and tip.stochastic_direction:
-			var gravity := Vector3(0.0, -pattern.gravity_curve * 0.05, 0.0)
-			tip.direction = (tip.direction + gravity).normalized()
-
-		_accumulate_cambium_on_path(tip_id, 0.05, pattern)
-		_update_branch_profile(tip, pattern)
-
-		if tip.length - tip.length_at_last_production >= segment_length * 0.98:
-			if pattern.use_lsystem:
-				LSystemInterpreter.apply_at_tip(self, tip_id, pattern)
-			elif _should_random_bud(tip, pattern, 1.0):
-				_bud_child_random(tip_id, pattern)
-			tip.next_segment_length = -1.0
-
+	_sync_pipe_taper_settings(pattern)
+	_update_auxin(pattern)
+	GrowthStep.process_active_tips(self, pattern, {
+		"mode": "lab_step",
+		"speed_mult": speed_mult,
+		"cambium_delta": 0.05,
+	})
 	graph_changed.emit()
 
 
@@ -897,7 +993,7 @@ func _is_growable_seed(node, pattern) -> bool:
 		return false
 	if node.depth >= pattern.max_branch_depth:
 		return false
-	if node.length >= GrowthLimits.max_length_for_depth(node.depth):
+	if _remaining_axial_budget(node.id) <= 0.001:
 		return false
 	return true
 
@@ -967,7 +1063,8 @@ func adapt_after_edit() -> void:
 	for node_id in nodes.keys():
 		var node = nodes[node_id]
 		if node.children.is_empty() and not node.is_growing_tip and node.cut_timestamp < 0.0:
-			node.is_growing_tip = true
+			if _remaining_axial_budget(node_id) > 0.001:
+				node.is_growing_tip = true
 
 
 func get_joint(node_id: int) -> Vector3:
