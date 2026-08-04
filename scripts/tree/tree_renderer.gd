@@ -2,9 +2,13 @@ extends Node3D
 class_name TreeRenderer
 
 signal branch_clicked(branch_id: int, hit_position: Vector3)
+signal dead_leaf_clicked(tip_id: int)
 
-const BranchMeshBuilder = preload("res://scripts/tree/branch_mesh_builder.gd")
+const GinsengCaudexMesh = preload("res://scripts/tree/ginseng_caudex_mesh.gd")
 const BranchSegment = preload("res://scripts/tree/branch_segment.gd")
+const FoliagePreset = preload("res://scripts/tree/foliage_preset.gd")
+const FoliageMeshBuilder = preload("res://scripts/tree/foliage_mesh_builder.gd")
+const FoliageRenderer = preload("res://scripts/tree/foliage_renderer.gd")
 const MeshConstants = preload("res://scripts/util/mesh_constants.gd")
 const Vector3Frame = preload("res://scripts/util/vector3_frame.gd")
 
@@ -18,11 +22,14 @@ enum BranchMeshMode { CYLINDERS, DECIMATED_CYLINDERS, SWEPT_TUBE, RING_LOFT }
 @export var radial_segments: int = 10
 @export var thickness_visual_scale: float = 1.0
 @export var prune_hover_enabled: bool = false
+@export var tend_pick_enabled: bool = false
 @export var prune_ring_min_radius: float = 0.018
 @export var branch_mesh_mode: BranchMeshMode = BranchMeshMode.CYLINDERS
 @export var show_wood_wireframe: bool = false
 @export var show_centerlines: bool = false
+@export var show_attractor_points: bool = false
 @export var centerline_color: Color = Color(0.28, 0.82, 1.0, 0.95)
+@export var attractor_color: Color = Color(0.35, 0.92, 0.45, 0.9)
 @export var guide_ring_spacing: float = 0.045
 @export var segment_jitter: float = 0.07
 @export var corner_blend_bend_deg: float = 5.0
@@ -41,11 +48,19 @@ var _graft_pool: Dictionary = {}
 var _wireframe_pool: Dictionary = {}
 var _hub_pool: Dictionary = {}
 var _pick_areas: Dictionary = {}
+var _dead_leaf_root: Node3D
+var _dead_leaf_pool: Dictionary = {}
+var _dead_leaf_material: StandardMaterial3D
+var _foliage_renderer: FoliageRenderer
+var _caudex_mesh: MeshInstance3D
+var _caudex_wire_mesh: MeshInstance3D
 var _segments_root: Node3D
 var _caps_root: Node3D
 var _wireframe_root: Node3D
 var _centerline_root: Node3D
 var _centerline_mesh: MeshInstance3D
+var _attractor_root: Node3D
+var _attractor_multimesh: MultiMeshInstance3D
 var _overlay_root: Node3D
 var _hover_ring: MeshInstance3D
 var _hover_ring_mesh: TorusMesh
@@ -71,9 +86,34 @@ func _ready() -> void:
 	_centerline_mesh = MeshInstance3D.new()
 	_centerline_mesh.name = "CenterlineMesh"
 	_centerline_root.add_child(_centerline_mesh)
+	_attractor_root = Node3D.new()
+	_attractor_root.name = "Attractors"
+	add_child(_attractor_root)
+	_attractor_multimesh = MultiMeshInstance3D.new()
+	_attractor_multimesh.name = "AttractorPoints"
+	_attractor_root.add_child(_attractor_multimesh)
+	var attractor_material := StandardMaterial3D.new()
+	attractor_material.albedo_color = attractor_color
+	attractor_material.emission_enabled = true
+	attractor_material.emission = attractor_color
+	attractor_material.emission_energy_multiplier = 0.8
+	attractor_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_attractor_multimesh.material_override = attractor_material
 	_overlay_root = Node3D.new()
 	_overlay_root.name = "Overlays"
 	add_child(_overlay_root)
+	_dead_leaf_root = Node3D.new()
+	_dead_leaf_root.name = "DeadLeaves"
+	_overlay_root.add_child(_dead_leaf_root)
+	_foliage_renderer = FoliageRenderer.new()
+	_foliage_renderer.name = "Foliage"
+	add_child(_foliage_renderer)
+	_caudex_mesh = MeshInstance3D.new()
+	_caudex_mesh.name = "CaudexMesh"
+	_overlay_root.add_child(_caudex_mesh)
+	_caudex_wire_mesh = MeshInstance3D.new()
+	_caudex_wire_mesh.name = "CaudexWireframe"
+	_overlay_root.add_child(_caudex_wire_mesh)
 	_ensure_hover_ring()
 	_move_centerlines_to_front()
 	_wireframe_material = StandardMaterial3D.new()
@@ -141,6 +181,14 @@ func handle_prune_input(event: InputEvent) -> bool:
 	return false
 
 
+func set_tend_pick_enabled(enabled: bool) -> void:
+	tend_pick_enabled = enabled
+	for tip_id in _dead_leaf_pool.keys():
+		var area: Area3D = _dead_leaf_pool[tip_id]
+		if is_instance_valid(area):
+			area.input_ray_pickable = enabled
+
+
 func set_prune_hover_enabled(enabled: bool) -> void:
 	prune_hover_enabled = enabled
 	if not enabled:
@@ -168,9 +216,26 @@ func set_show_centerlines(enabled: bool) -> void:
 	rebuild()
 
 
+func set_show_attractor_points(enabled: bool) -> void:
+	if show_attractor_points == enabled:
+		return
+	show_attractor_points = enabled
+	rebuild()
+
+
+func set_show_foliage(enabled: bool) -> void:
+	if _foliage_renderer == null:
+		return
+	if _foliage_renderer.show_foliage == enabled:
+		return
+	_foliage_renderer.show_foliage = enabled
+	_foliage_renderer.rebuild()
+
+
 func setup(graph, species) -> void:
 	_graph = graph
 	_species = species
+	_dead_leaf_material = null
 	_ensure_materials()
 	_apply_species_colors()
 	if _graph:
@@ -218,15 +283,52 @@ func rebuild() -> void:
 	_cleanup_stale_pools(live_ids)
 
 	for node_id in _graph.nodes.keys():
+		var node = _graph.nodes[node_id]
+		if node.is_caudex_anchor:
+			continue
 		_render_branch(node_id)
 
 	if _uses_fork_hubs():
 		for node_id in _graph.nodes.keys():
 			var node = _graph.nodes[node_id]
-			if not node.children.is_empty():
-				_render_fork_hub(node_id)
+			if node.children.is_empty() or _should_skip_fork_hub(node_id):
+				continue
+			_render_fork_hub(node_id)
 
 	_rebuild_centerlines()
+	_rebuild_attractors()
+	_rebuild_foliage()
+	_rebuild_dead_leaves()
+	_rebuild_caudex_mesh()
+
+
+func _rebuild_attractors() -> void:
+	if _attractor_multimesh == null:
+		return
+	if not show_attractor_points or _graph == null:
+		_attractor_multimesh.visible = false
+		return
+	var field = _graph.get_attractor_field()
+	if field == null:
+		_attractor_multimesh.visible = false
+		return
+	var points: Array[Vector3] = field.get_points()
+	if points.is_empty():
+		_attractor_multimesh.visible = false
+		return
+
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.012
+	sphere.height = 0.024
+	var multimesh := MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.mesh = sphere
+	multimesh.instance_count = points.size()
+	for i in range(points.size()):
+		var transform := Transform3D(Basis(), points[i])
+		multimesh.set_instance_transform(i, transform)
+	_attractor_multimesh.multimesh = multimesh
+	_attractor_multimesh.visible = true
 
 
 func _rebuild_centerlines() -> void:
@@ -240,6 +342,9 @@ func _rebuild_centerlines() -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_LINES)
 	for node_id in _graph.nodes.keys():
+		var node = _graph.nodes.get(node_id)
+		if node and node.is_caudex_anchor:
+			continue
 		var seg: Dictionary = BranchSegment.from_graph(_graph, node_id)
 		var start: Vector3 = seg.start
 		var end: Vector3 = seg.end
@@ -253,6 +358,48 @@ func _rebuild_centerlines() -> void:
 	_centerline_mesh.material_override = _centerline_material
 	_centerline_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_centerline_mesh.visible = true
+
+
+func _rebuild_caudex_mesh() -> void:
+	if _caudex_mesh == null or _graph == null:
+		return
+	if not _graph.has_caudex:
+		_caudex_mesh.visible = false
+		if _caudex_wire_mesh:
+			_caudex_wire_mesh.visible = false
+		return
+
+	var top_radius: float = 0.012
+	if _graph.nodes.has(_graph.root_id):
+		for child_id in _graph.nodes[_graph.root_id].children:
+			var child = _graph.nodes.get(child_id)
+			if child and not child.is_caudex_anchor:
+				top_radius = child.base_thickness + child.cambium_thickness
+				break
+
+	var mesh: ArrayMesh = GinsengCaudexMesh.build(
+		_graph.caudex_arc_count,
+		_graph.caudex_height,
+		_graph.caudex_bulk_radius,
+		top_radius,
+	)
+	_caudex_mesh.mesh = mesh
+	_ensure_materials()
+	_caudex_mesh.material_override = trunk_material
+	_caudex_mesh.visible = mesh != null
+
+	if _caudex_wire_mesh:
+		var wire: ArrayMesh = GinsengCaudexMesh.build_wireframe(
+			_graph.caudex_arc_count,
+			_graph.caudex_height,
+			_graph.caudex_bulk_radius,
+			top_radius,
+		)
+		_caudex_wire_mesh.mesh = wire
+		_ensure_centerline_material()
+		_caudex_wire_mesh.material_override = _centerline_material
+		_caudex_wire_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_caudex_wire_mesh.visible = show_centerlines and wire != null
 
 
 func _move_centerlines_to_front() -> void:
@@ -314,6 +461,15 @@ func _cleanup_stale_pools(live_ids: Dictionary) -> void:
 			if is_instance_valid(area):
 				area.queue_free()
 			_pick_areas.erase(node_id)
+	for tip_id in _dead_leaf_pool.keys():
+		var should_keep: bool = live_ids.has(tip_id) \
+			and _graph.nodes.has(tip_id) \
+			and _graph.nodes[tip_id].has_dead_leaf
+		if not should_keep:
+			var dead_area: Area3D = _dead_leaf_pool[tip_id]
+			if is_instance_valid(dead_area):
+				dead_area.queue_free()
+			_dead_leaf_pool.erase(tip_id)
 
 
 func _hide_all_pools() -> void:
@@ -342,6 +498,9 @@ func _clear_wireframes() -> void:
 
 
 func _render_branch(node_id: int) -> void:
+	var node = _graph.nodes[node_id]
+	if node.is_caudex_anchor:
+		return
 	match branch_mesh_mode:
 		BranchMeshMode.DECIMATED_CYLINDERS:
 			_render_branch_decimated(node_id)
@@ -616,6 +775,17 @@ func _uses_profile_guides() -> bool:
 func _uses_fork_hubs() -> bool:
 	return branch_mesh_mode == BranchMeshMode.SWEPT_TUBE \
 		or branch_mesh_mode == BranchMeshMode.RING_LOFT
+
+
+func _should_skip_fork_hub(parent_id: int) -> bool:
+	if _graph == null or not _graph.nodes.has(parent_id):
+		return false
+	for child_id in _graph.nodes[parent_id].children:
+		if not _graph.nodes.has(child_id):
+			continue
+		if _graph.nodes[child_id].is_basal_leg:
+			return true
+	return false
 
 
 func _get_fork_hub(parent_id: int) -> MeshInstance3D:
@@ -1173,6 +1343,96 @@ func _on_branch_input_event(
 		branch_clicked.emit(branch_id, local_hit)
 	if event is InputEventScreenTouch and event.pressed:
 		branch_clicked.emit(branch_id, local_hit)
+
+
+func _rebuild_foliage() -> void:
+	if _foliage_renderer == null:
+		return
+	_foliage_renderer.set_context(_graph, _species)
+	_foliage_renderer.rebuild()
+
+
+func _rebuild_dead_leaves() -> void:
+	if _graph == null or _dead_leaf_root == null:
+		return
+
+	var live_dead: Dictionary = {}
+	for tip_id in _graph.get_dead_leaf_tip_ids():
+		live_dead[int(tip_id)] = true
+		_update_dead_leaf_marker(int(tip_id))
+
+	for tip_id in _dead_leaf_pool.keys():
+		if not live_dead.has(tip_id):
+			var stale_area: Area3D = _dead_leaf_pool[tip_id]
+			if is_instance_valid(stale_area):
+				stale_area.queue_free()
+			_dead_leaf_pool.erase(tip_id)
+
+
+func _ensure_dead_leaf_material() -> void:
+	if _dead_leaf_material != null:
+		return
+	var preset: FoliagePreset = FoliagePreset.resolve(_species)
+	_dead_leaf_material = StandardMaterial3D.new()
+	_dead_leaf_material.albedo_color = preset.dead_leaf_color if preset else Color(0.42, 0.28, 0.14)
+	_dead_leaf_material.roughness = 0.95
+	_dead_leaf_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+
+func _update_dead_leaf_marker(tip_id: int) -> void:
+	var preset: FoliagePreset = FoliagePreset.resolve(_species)
+	_ensure_dead_leaf_material()
+	var tip_pos: Vector3 = _graph.get_world_tip(tip_id)
+	var node = _graph.nodes[tip_id]
+	var branch_dir: Vector3 = node.direction.normalized()
+	var offset: Vector3 = branch_dir * 0.018
+	var marker_pos: Vector3 = tip_pos + offset
+
+	var area: Area3D
+	if _dead_leaf_pool.has(tip_id):
+		area = _dead_leaf_pool[tip_id]
+	else:
+		area = Area3D.new()
+		area.name = "DeadLeaf_%d" % tip_id
+		area.collision_layer = 1
+		area.collision_mask = 0
+		area.input_ray_pickable = tend_pick_enabled
+		var mesh_instance := MeshInstance3D.new()
+		mesh_instance.name = "LeafMesh"
+		mesh_instance.mesh = FoliageMeshBuilder.get_dead_leaf_mesh(preset)
+		mesh_instance.material_override = _dead_leaf_material
+		var droop: float = (preset.droop_deg if preset else 15.0) + (preset.dead_leaf_droop_extra_deg if preset else 25.0)
+		mesh_instance.rotation_degrees = Vector3(-droop, 15.0, 0.0)
+		var leaf_scale: float = preset.dead_leaf_scale if preset else 0.9
+		mesh_instance.scale = Vector3.ONE * leaf_scale
+		area.add_child(mesh_instance)
+		var collision := CollisionShape3D.new()
+		var shape := SphereShape3D.new()
+		shape.radius = 0.04
+		collision.shape = shape
+		area.add_child(collision)
+		area.input_event.connect(_on_dead_leaf_input_event.bind(tip_id))
+		_dead_leaf_root.add_child(area)
+		_dead_leaf_pool[tip_id] = area
+
+	area.position = marker_pos
+	area.visible = true
+
+
+func _on_dead_leaf_input_event(
+	_camera: Node,
+	event: InputEvent,
+	_event_position: Vector3,
+	_normal: Vector3,
+	_shape_idx: int,
+	tip_id: int
+) -> void:
+	if not tend_pick_enabled:
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		dead_leaf_clicked.emit(tip_id)
+	if event is InputEventScreenTouch and event.pressed:
+		dead_leaf_clicked.emit(tip_id)
 
 
 func play_happy_bounce() -> void:

@@ -81,6 +81,11 @@ layout_mode = 2
 max_value = 100.0
 show_percentage = false
 
+[node name="MoistureStatusLabel" type="Label" parent="TopBar/RightPanel/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Content"
+
 [node name="GrowthIndicator" type="Label" parent="TopBar/RightPanel/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -136,6 +141,13 @@ layout_mode = 2
 toggle_mode = true
 button_group = SubResource("ButtonGroup_tools")
 text = "Graft"
+
+[node name="TendButton" type="Button" parent="BottomBar/ToolRow"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+button_group = SubResource("ButtonGroup_tools")
+text = "Tend"
 
 [node name="WaterButton" type="Button" parent="BottomBar"]
 unique_name_in_owner = true

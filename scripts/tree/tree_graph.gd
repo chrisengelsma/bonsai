@@ -11,7 +11,14 @@ const LSystemSymbols = preload("res://scripts/tree/lsystem_symbols.gd")
 const MathUtils = preload("res://scripts/util/math_utils.gd")
 const Vector3Frame = preload("res://scripts/util/vector3_frame.gd")
 const AuxinModel = preload("res://scripts/tree/auxin_model.gd")
+const DeadLeafModel = preload("res://scripts/tree/dead_leaf_model.gd")
 const PipeTaper = preload("res://scripts/tree/pipe_taper.gd")
+const CrownAttractorField = preload("res://scripts/tree/crown_attractor_field.gd")
+const BasalForm = preload("res://scripts/tree/basal_form.gd")
+const BasalRadiusProfile = preload("res://scripts/tree/basal_radius_profile.gd")
+const GinsengBasalForm = preload("res://scripts/tree/ginseng_basal_form.gd")
+const CaudexGrowthModel = preload("res://scripts/tree/caudex_growth_model.gd")
+const BranchMeshBuilder = preload("res://scripts/tree/branch_mesh_builder.gd")
 
 const JOINT_COLLAR_LENGTH_FRAC := 0.38
 const FORK_TAPER_MIN_LENGTH := 0.038
@@ -23,6 +30,7 @@ var nodes: Dictionary = {}
 var root_id: int = -1
 var next_id: int = 0
 var species_id: String = ""
+var species = null
 var _thickness_falloff: float = 0.72
 var _use_pipe_taper: bool = true
 var _pipe_exponent: float = 2.0
@@ -32,6 +40,12 @@ var _growth_pattern = null
 var _rng := RandomNumberGenerator.new()
 var _allow_prune_spawn: bool = false
 var _auxin_levels: Dictionary = {}
+var _attractor_field: CrownAttractorField = null
+
+var has_caudex: bool = false
+var caudex_bulk_radius: float = 0.0
+var caudex_arc_count: int = 3
+var caudex_height: float = 0.105
 
 const PATH_RADIUS_DECAY := 2.05
 
@@ -44,47 +58,51 @@ func clear() -> void:
 	nodes.clear()
 	root_id = -1
 	next_id = 0
+	_attractor_field = null
+	has_caudex = false
+	caudex_bulk_radius = 0.0
+	caudex_arc_count = 3
+	caudex_height = 0.105
 
 
-func create_from_species(species) -> void:
+func create_from_species(species_resource) -> void:
 	clear()
-	species_id = species.id
-	var pattern = species.grow_pattern if species.grow_pattern else null
+	species = species_resource
+	species_id = species_resource.id
+	var pattern = species_resource.grow_pattern if species_resource.grow_pattern else null
 	if pattern:
 		_thickness_falloff = pattern.thickness_falloff
 		_growth_pattern = pattern
-	if species.starter_graph.is_empty():
-		_create_default_starter(species, pattern)
+	if species_resource.starter_graph.is_empty():
+		_create_default_starter(species_resource, pattern)
 	else:
-		from_dict(species.starter_graph)
+		from_dict(species_resource.starter_graph)
 
 
-func create_from_lab_pattern(species, pattern) -> void:
+func create_from_lab_pattern(species_resource, pattern) -> void:
 	clear()
-	species_id = species.id
+	species = species_resource
+	species_id = species_resource.id
 	if pattern:
 		_thickness_falloff = pattern.thickness_falloff
-		_growth_pattern = pattern
 		_growth_pattern = pattern
 	_create_default_starter(species, pattern)
+	init_attractors_from_preset(pattern)
 
 
 func _create_default_starter(species, pattern) -> void:
 	if pattern == null:
 		pattern = species.grow_pattern
-	var root_thickness: float = pattern.trunk_thickness
-	if species.id == "ginseng_ficus":
-		root_thickness *= 1.15
 
+	var basal_form: String = str(species.basal_form if species else BasalForm.STANDARD)
+	if basal_form == BasalForm.GINSENG_CAUDEX:
+		GinsengBasalForm.build(self, pattern)
+		return
+
+	var root_thickness: float = pattern.trunk_thickness
 	var root = _create_node(-1, Vector3.UP, root_thickness, 0)
-	root.length = 0.09 if species.id == "ginseng_ficus" else 0.04
+	root.length = 0.04
 	root.base_thickness = root_thickness
-	if species.id == "ginseng_ficus":
-		root.cambium_thickness = pattern.trunk_thickness * 0.06
-		root.thickness = root.base_thickness + root.cambium_thickness
-		root.ring_samples.clear()
-		root.locked_wobble.clear()
-		_init_branch_profile(root)
 	root.is_growing_tip = true
 	root.lsymbol = pattern.lsystem_axiom if pattern.use_lsystem else "T"
 	if pattern.deterministic_growth:
@@ -98,8 +116,19 @@ func _create_default_starter(species, pattern) -> void:
 
 
 func get_trunk_base_spawn_radius() -> float:
+	if has_caudex:
+		return clampf(caudex_bulk_radius * 1.55, 0.012, 0.12)
 	if not nodes.has(root_id):
 		return 0.014
+	var max_radius: float = 0.008
+	for node_id in nodes.keys():
+		var node = nodes[node_id]
+		if node.depth > 1 and not node.is_basal_leg:
+			continue
+		if node.depth == 0 or node.is_basal_leg:
+			max_radius = maxf(max_radius, node.base_thickness + node.cambium_thickness)
+	if max_radius > 0.008:
+		return clampf(max_radius * 1.65, 0.008, 0.09)
 	var root = nodes[root_id]
 	return clampf(root.thickness * 1.75, 0.008, 0.05)
 
@@ -120,8 +149,8 @@ func _create_node(parent_id: int, direction: Vector3, thickness: float, depth: i
 	return node
 
 
-func grow(delta: float, pattern, moisture_ok: bool, speed_mult: float, soil_mult: float) -> void:
-	if not moisture_ok:
+func grow(delta: float, pattern, moisture_factor: float, speed_mult: float, soil_mult: float) -> void:
+	if moisture_factor <= 0.0:
 		return
 
 	GrowthLimits.clamp_pattern(pattern)
@@ -133,16 +162,37 @@ func grow(delta: float, pattern, moisture_ok: bool, speed_mult: float, soil_mult
 
 	var now = Time.get_ticks_msec() / 1000.0
 	_process_regrowth(now, pattern, delta)
+	_prepare_colonization(pattern)
 
 	GrowthStep.process_active_tips(self, pattern, {
 		"mode": "continuous",
 		"delta": delta,
 		"speed_mult": speed_mult,
 		"soil_mult": soil_mult,
+		"moisture_factor": moisture_factor,
 		"over_height": over_height,
+		"attractor_field": _attractor_field,
 	})
 
+	if has_caudex:
+		CaudexGrowthModel.accumulate(self, delta, pattern, moisture_factor)
+
 	graph_changed.emit()
+
+
+func tend_dead_leaf_at_tip(tip_id: int) -> bool:
+	if not DeadLeafModel.tend_leaf(self, tip_id):
+		return false
+	graph_changed.emit()
+	return true
+
+
+func get_dead_leaf_tip_ids() -> Array:
+	return DeadLeafModel.get_dead_leaf_tip_ids(self)
+
+
+func count_dead_leaves() -> int:
+	return DeadLeafModel.count_dead_leaves(self)
 
 
 func _update_auxin(pattern) -> void:
@@ -514,6 +564,9 @@ func _segment_base_radius(node) -> float:
 	var core_radius: float = node.base_thickness + node.cambium_thickness
 	var min_radius: float = maxf(core_radius * 0.38, 0.0035)
 
+	if _growth_pattern != null and _growth_pattern.use_fork_bulb and node.children.size() >= 2:
+		core_radius *= 1.14
+
 	# Match the parent exit radius at joints so segments taper continuously
 	# instead of re-thickening into stacked cones.
 	if node.profile_joint_radius > 0.0:
@@ -575,19 +628,20 @@ func _radius_at_dist(node, dist: float) -> float:
 
 	var base_radius: float = _segment_base_radius(node)
 	var tip_radius: float = _segment_tip_radius(node, base_radius)
+	var radius: float
 
 	if _use_pipe_taper:
-		return _clamp_render_radius(
-			node,
-			maxf(
-				PipeTaper.segment_radius(base_radius, tip_radius, local_t, _segment_taper_power),
-				maxf(base_radius * 0.35, 0.0035)
-			)
+		radius = maxf(
+			PipeTaper.segment_radius(base_radius, tip_radius, local_t, _segment_taper_power),
+			maxf(base_radius * 0.35, 0.0035)
 		)
+	else:
+		radius = lerpf(base_radius, tip_radius, MathUtils.smoothstep(pow(local_t, 0.9)))
 
-	var radius: float = lerpf(base_radius, tip_radius, MathUtils.smoothstep(pow(local_t, 0.9)))
+	if _growth_pattern != null:
+		radius = BasalRadiusProfile.apply_bulge(radius, local_t, node, _growth_pattern)
 
-	if _has_lateral_children(node):
+	if not _use_pipe_taper and _has_lateral_children(node):
 		var fork_len: float = minf(_fork_taper_length(node), length * 0.85)
 		var fork_start: float = maxf(length - fork_len, 0.0)
 		if dist >= fork_start:
@@ -738,8 +792,12 @@ func _accumulate_cambium_on_path(node_id: int, delta: float, pattern) -> void:
 			continue
 
 		var rate: float = pattern.cambium_growth_rate * delta * node.growth_energy
-		if node.depth == 0:
+		if node.is_basal_leg and pattern.basal_cambium_mult > 0.0:
+			rate *= pattern.basal_cambium_mult
+		elif node.depth == 0 and not node.is_caudex_anchor:
 			rate *= 1.45
+		elif pattern.basal_bulge_strength > 0.0 and node.depth >= 2:
+			rate *= 0.12
 		else:
 			rate *= pow(pattern.thickness_falloff, float(node.depth) * 0.42)
 
@@ -850,6 +908,7 @@ func prune_at_point(branch_id: int, local_hit: Vector3, sole_seed: bool = false)
 	node.length_at_last_production = node.length
 	node.next_segment_length = -1.0
 	node.foliage_amount = 0.0
+	node.has_dead_leaf = false
 	node.is_growing_tip = false
 
 	_truncate_branch_profile(node, along)
@@ -951,10 +1010,12 @@ func advance_lab_step(pattern, speed_mult: float = 1.0) -> void:
 	_thickness_falloff = pattern.thickness_falloff
 	_sync_pipe_taper_settings(pattern)
 	_update_auxin(pattern)
+	_prepare_colonization(pattern)
 	GrowthStep.process_active_tips(self, pattern, {
 		"mode": "lab_step",
 		"speed_mult": speed_mult,
 		"cambium_delta": 0.05,
+		"attractor_field": _attractor_field,
 	})
 	graph_changed.emit()
 
@@ -1071,15 +1132,20 @@ func get_joint(node_id: int) -> Vector3:
 	var node = nodes[node_id]
 	if node.parent_id < 0:
 		return Vector3.ZERO
-	var parent = nodes[node.parent_id]
-	var parent_start: Vector3 = get_joint(node.parent_id)
-	return parent_start + parent.direction.normalized() * parent.length
+	return get_world_tip(node.parent_id)
 
 
 func get_world_tip(node_id: int) -> Vector3:
-	var node = nodes[node_id]
-	var start: Vector3 = get_joint(node_id)
-	return start + node.direction.normalized() * node.length
+	if not nodes.has(node_id):
+		return Vector3.ZERO
+	return get_joint(node_id) + _branch_tip_offset(nodes[node_id])
+
+
+func _branch_tip_offset(node) -> Vector3:
+	if node.ring_samples.size() >= 2:
+		var centers: Array = BranchMeshBuilder.compute_sample_centers(node.ring_samples)
+		return centers[-1]
+	return node.direction.normalized() * node.length
 
 
 func get_maturity_label() -> String:
@@ -1163,12 +1229,19 @@ func to_dict() -> Dictionary:
 	var node_dict = {}
 	for node_id in nodes.keys():
 		node_dict[str(node_id)] = nodes[node_id].to_dict()
-	return {
+	var data := {
 		"species_id": species_id,
 		"root_id": root_id,
 		"next_id": next_id,
 		"nodes": node_dict,
+		"has_caudex": has_caudex,
+		"caudex_bulk_radius": caudex_bulk_radius,
+		"caudex_arc_count": caudex_arc_count,
+		"caudex_height": caudex_height,
 	}
+	if _attractor_field != null:
+		data["attractor_field"] = _attractor_field.to_dict()
+	return data
 
 
 func from_dict(data: Dictionary) -> void:
@@ -1184,3 +1257,41 @@ func from_dict(data: Dictionary) -> void:
 			_init_branch_profile(node)
 		else:
 			_refresh_ring_sample_radii(node)
+	has_caudex = bool(data.get("has_caudex", false))
+	caudex_bulk_radius = float(data.get("caudex_bulk_radius", 0.0))
+	caudex_arc_count = int(data.get("caudex_arc_count", 3))
+	caudex_height = float(data.get("caudex_height", 0.105))
+	var attractor_data: Dictionary = data.get("attractor_field", {})
+	if not attractor_data.is_empty():
+		_attractor_field = CrownAttractorField.new()
+		_attractor_field.from_dict(attractor_data)
+
+
+func get_attractor_field() -> CrownAttractorField:
+	return _attractor_field
+
+
+func init_attractors_from_preset(pattern) -> void:
+	_attractor_field = CrownAttractorField.new()
+	if pattern == null or not pattern.use_space_colonization:
+		return
+	_attractor_field.scatter_from_preset(
+		pattern.colonization_volume_preset,
+		pattern.colonization_point_count,
+		pattern.colonization_influence_radius,
+		pattern.colonization_kill_distance,
+		_rng
+	)
+
+
+func reseed_attractors_from_preset(pattern) -> void:
+	init_attractors_from_preset(pattern)
+	graph_changed.emit()
+
+
+func _prepare_colonization(pattern) -> void:
+	if pattern == null or not pattern.use_space_colonization or _attractor_field == null:
+		return
+	_attractor_field.influence_radius = pattern.colonization_influence_radius
+	_attractor_field.kill_distance = pattern.colonization_kill_distance
+	_attractor_field.refresh_assignment(self)

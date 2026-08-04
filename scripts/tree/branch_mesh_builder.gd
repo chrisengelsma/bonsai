@@ -394,21 +394,41 @@ static func _build_spine_path(
 	ring_spacing: float
 ) -> Array:
 	var length: float = maxf(branch_length, 0.02)
-	var tip_direction: Vector3 = BranchProfileSamples.resolve_tip_direction(tip_dir, samples)
+	var key_samples: Array = finalize_branch_samples(samples, branch_length, tip_dir)
+	if key_samples.size() < 2:
+		return []
 
+	var key_centers: Array = compute_sample_centers(key_samples)
 	var ring_count: int = maxi(2, int(ceil(length / maxf(ring_spacing, 0.004))) + 1)
 	var spine: Array = []
 	for ring_i in range(ring_count):
 		var t: float = float(ring_i) / float(ring_count - 1)
 		var dist: float = length * t
-		var profile_sample: Dictionary = interpolate_sample_at_dist(samples, dist)
+		var profile_sample: Dictionary = interpolate_sample_at_dist(key_samples, dist)
+		var center: Vector3 = _center_at_dist(key_samples, key_centers, dist)
+		var tangent: Vector3 = profile_sample.get("dir", tip_dir).normalized()
 		spine.append({
-			"center": tip_direction * dist,
-			"tangent": tip_direction,
+			"center": center,
+			"tangent": tangent,
 			"r": float(profile_sample.get("r", 0.02)),
 			"dist": dist,
 		})
 	return spine
+
+
+static func _center_at_dist(samples: Array, centers: Array, dist: float) -> Vector3:
+	if samples.is_empty() or centers.is_empty():
+		return Vector3.ZERO
+	if dist <= float(samples[0].get("dist", 0.0)):
+		return centers[0]
+	for i in range(1, samples.size()):
+		var prev_dist: float = float(samples[i - 1].get("dist", 0.0))
+		var next_dist: float = float(samples[i].get("dist", 0.0))
+		if dist <= next_dist:
+			var span: float = next_dist - prev_dist
+			var local_t: float = 0.0 if span <= 0.0001 else clampf((dist - prev_dist) / span, 0.0, 1.0)
+			return centers[i - 1].lerp(centers[i], local_t)
+	return centers[-1]
 
 
 static func _build_branch_rings_from_spine(

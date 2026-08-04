@@ -52,7 +52,7 @@ static func grow_until_productions(graph: TreeGraph, pattern: GrowPattern, produ
 	while fired < production_count and safety < 5000:
 		safety += 1
 		var before := _production_fingerprint(graph)
-		graph.grow(0.02, pattern, true, 4.0, 1.0)
+		graph.grow(0.02, pattern, 1.0, 4.0, 1.0)
 		var after := _production_fingerprint(graph)
 		if after != before:
 			fired += 1

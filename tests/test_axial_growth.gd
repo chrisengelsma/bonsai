@@ -37,7 +37,7 @@ func _run_species_checks(species_path: String) -> Array[String]:
 	var segment_length: float = pattern.lsystem_segment_length
 
 	for _i in range(GROW_STEPS):
-		graph.grow(GROW_DELTA, pattern, true, GROW_SPEED, 1.0)
+		graph.grow(GROW_DELTA, pattern, 1.0, GROW_SPEED, 1.0)
 
 	for node_id in graph.nodes.keys():
 		var node = graph.nodes[node_id]
@@ -78,18 +78,18 @@ func _run_species_checks(species_path: String) -> Array[String]:
 
 func _check_reactivate_does_not_extend_exhausted_branches() -> Array[String]:
 	var failures: Array[String] = []
-	var species = load("res://resources/species/ginseng_ficus.tres")
+	var species = load("res://resources/species/classic_upright.tres")
 	var pattern = species.grow_pattern
 	var graph = TreeGraph.new()
 	graph.create_from_species(species)
 
 	for _i in range(GROW_STEPS):
-		graph.grow(GROW_DELTA, pattern, true, GROW_SPEED, 1.0)
+		graph.grow(GROW_DELTA, pattern, 1.0, GROW_SPEED, 1.0)
 
 	var before: float = _max_axial_chain(graph)
 	graph.reactivate_seed_tips(pattern)
 	for _i in range(120):
-		graph.grow(GROW_DELTA, pattern, true, GROW_SPEED, 1.0)
+		graph.grow(GROW_DELTA, pattern, 1.0, GROW_SPEED, 1.0)
 
 	var after: float = _max_axial_chain(graph)
 	if after > before + 0.015:

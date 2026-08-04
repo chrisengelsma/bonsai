@@ -1,13 +1,15 @@
-[gd_resource type="Resource" script_class="TreeSpecies" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="TreeSpecies" load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/catalog/tree_species.gd" id="1"]
 [ext_resource type="Resource" path="res://resources/species/cascade_pattern.tres" id="2"]
+[ext_resource type="Resource" path="res://resources/foliage/cascade.tres" id="3"]
 
 [resource]
 script = ExtResource("1")
 id = "cascade"
 display_name = "Cascade"
 grow_pattern = ExtResource("2")
+foliage = ExtResource("3")
 trunk_color = Color(0.5, 0.32, 0.18, 1)
 foliage_color = Color(0.38, 0.52, 0.4, 1)
 starter_graph = {}

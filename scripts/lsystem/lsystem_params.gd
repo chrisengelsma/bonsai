@@ -22,9 +22,25 @@ extends Resource
 @export var auxin_decay: float = 0.68
 @export var auxin_source_strength: float = 1.0
 
+@export var use_space_colonization: bool = false
+@export var colonization_strength: float = 0.35
+@export var colonization_spawn_strength: float = 0.25
+@export var colonization_influence_radius: float = 0.42
+@export var colonization_kill_distance: float = 0.06
+@export var colonization_point_count: int = 120
+@export var colonization_volume_preset: String = "dome"
+
 @export var line_color: Color = Color(0.55, 0.35, 0.2, 1.0)
 @export var line_width: float = 0.004
 @export var render_cylinders: bool = false
+
+@export var foliage_enabled: bool = true
+@export var foliage_mesh_style: int = 2
+@export var foliage_placement: int = 0
+@export var foliage_growth_rate: float = 0.18
+@export var foliage_start_length: float = 0.06
+@export var foliage_sway_amount: float = 0.02
+@export var foliage_scale: float = 1.0
 
 
 func duplicate_params() -> LSystemParams:
@@ -63,7 +79,18 @@ func clamp_values() -> void:
 	apical_dominance = clampf(apical_dominance, 0.0, 1.0)
 	auxin_decay = clampf(auxin_decay, 0.2, 0.95)
 	auxin_source_strength = clampf(auxin_source_strength, 0.1, 2.5)
+	colonization_strength = clampf(colonization_strength, 0.0, 1.0)
+	colonization_spawn_strength = clampf(colonization_spawn_strength, 0.0, 1.0)
+	colonization_influence_radius = clampf(colonization_influence_radius, 0.08, 0.9)
+	colonization_kill_distance = clampf(colonization_kill_distance, 0.02, 0.2)
+	colonization_point_count = clampi(colonization_point_count, 20, 300)
 	line_width = clampf(line_width, 0.001, 0.02)
+	foliage_mesh_style = clampi(foliage_mesh_style, 0, 4)
+	foliage_placement = clampi(foliage_placement, 0, 2)
+	foliage_growth_rate = clampf(foliage_growth_rate, 0.0, 0.5)
+	foliage_start_length = clampf(foliage_start_length, 0.01, 0.2)
+	foliage_sway_amount = clampf(foliage_sway_amount, 0.0, 0.08)
+	foliage_scale = clampf(foliage_scale, 0.2, 1.5)
 
 
 static func from_grow_pattern(pattern) -> LSystemParams:
@@ -86,7 +113,56 @@ static func from_grow_pattern(pattern) -> LSystemParams:
 	params.apical_dominance = pattern.apical_dominance
 	params.auxin_decay = pattern.auxin_decay
 	params.auxin_source_strength = pattern.auxin_source_strength
+	params.use_space_colonization = pattern.use_space_colonization
+	params.colonization_strength = pattern.colonization_strength
+	params.colonization_spawn_strength = pattern.colonization_spawn_strength
+	params.colonization_influence_radius = pattern.colonization_influence_radius
+	params.colonization_kill_distance = pattern.colonization_kill_distance
+	params.colonization_point_count = pattern.colonization_point_count
+	params.colonization_volume_preset = pattern.colonization_volume_preset
+	params.foliage_growth_rate = pattern.foliage_growth_rate
+	params.foliage_start_length = pattern.foliage_start_length
+	params.foliage_enabled = str(pattern.foliage_style) != "none"
 	return params
+
+
+func sync_foliage_from_preset(preset) -> void:
+	if preset == null:
+		foliage_enabled = false
+		return
+	foliage_enabled = preset.mesh_style != 0
+	foliage_mesh_style = preset.mesh_style
+	foliage_placement = preset.placement
+	foliage_sway_amount = preset.sway_amount
+	var avg_scale: float = (preset.scale_range.x + preset.scale_range.y) * 0.5
+	foliage_scale = avg_scale
+
+
+func apply_foliage_to_preset(preset) -> void:
+	if preset == null:
+		return
+	if not foliage_enabled:
+		preset.mesh_style = 0
+		return
+	preset.mesh_style = foliage_mesh_style
+	preset.placement = foliage_placement
+	preset.sway_amount = foliage_sway_amount
+	var half_span: float = foliage_scale * 0.18
+	preset.scale_range = Vector2(
+		clampf(foliage_scale - half_span, 0.2, 1.5),
+		clampf(foliage_scale + half_span, 0.2, 1.5)
+	)
+
+
+func apply_foliage_timing_to_pattern(pattern) -> void:
+	if pattern == null:
+		return
+	pattern.foliage_growth_rate = foliage_growth_rate
+	pattern.foliage_start_length = foliage_start_length
+	if foliage_enabled:
+		pattern.foliage_style = "cluster"
+	else:
+		pattern.foliage_style = "none"
 
 
 func apply_to_grow_pattern(pattern) -> void:
@@ -108,6 +184,14 @@ func apply_to_grow_pattern(pattern) -> void:
 	pattern.apical_dominance = apical_dominance
 	pattern.auxin_decay = auxin_decay
 	pattern.auxin_source_strength = auxin_source_strength
+	pattern.use_space_colonization = use_space_colonization
+	pattern.colonization_strength = colonization_strength
+	pattern.colonization_spawn_strength = colonization_spawn_strength
+	pattern.colonization_influence_radius = colonization_influence_radius
+	pattern.colonization_kill_distance = colonization_kill_distance
+	pattern.colonization_point_count = colonization_point_count
+	pattern.colonization_volume_preset = colonization_volume_preset
 	pattern.use_lsystem = true
 	pattern.use_auxin = true
+	apply_foliage_timing_to_pattern(pattern)
 	pattern.invalidate_rules_cache()

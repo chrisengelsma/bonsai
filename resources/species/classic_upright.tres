@@ -1,13 +1,15 @@
-[gd_resource type="Resource" script_class="TreeSpecies" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="TreeSpecies" load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/catalog/tree_species.gd" id="1"]
 [ext_resource type="Resource" path="res://resources/species/classic_upright_pattern.tres" id="2"]
+[ext_resource type="Resource" path="res://resources/foliage/classic_upright.tres" id="3"]
 
 [resource]
 script = ExtResource("1")
 id = "classic_upright"
 display_name = "Classic Upright"
 grow_pattern = ExtResource("2")
+foliage = ExtResource("3")
 trunk_color = Color(0.55, 0.35, 0.2, 1)
 foliage_color = Color(0.42, 0.56, 0.44, 1)
 starter_graph = {}

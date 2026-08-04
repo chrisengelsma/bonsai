@@ -3,8 +3,6 @@ extends Node3D
 const TreeGraph = preload("res://scripts/tree/tree_graph.gd")
 const LSystemParams = preload("res://scripts/lsystem/lsystem_params.gd")
 const LSystemPresets = preload("res://scripts/lab/lsystem_presets.gd")
-const CLASSIC_SPECIES := preload("res://resources/species/classic_upright.tres")
-const CLASSIC_PATTERN := preload("res://resources/species/classic_upright_pattern.tres")
 
 @onready var renderer: Node3D = $LabTree/TreeRenderer
 @onready var panel: Control = $UI/TreeLabPanel
@@ -21,8 +19,7 @@ var _tool_mode: int = 0
 
 
 func _ready() -> void:
-	_species = CLASSIC_SPECIES
-	_pattern = CLASSIC_PATTERN.duplicate()
+	_species = LSystemPresets.species_for_preset(0)
 
 	panel.preset_selected.connect(_on_preset_selected)
 	panel.apply_pressed.connect(_on_apply_pressed)
@@ -32,9 +29,15 @@ func _ready() -> void:
 	panel.auxin_changed.connect(_on_auxin_changed)
 	panel.tool_mode_changed.connect(_on_tool_mode_changed)
 	panel.display_changed.connect(_on_display_changed)
+	panel.foliage_changed.connect(_on_foliage_changed)
 	panel.camera_distance_changed.connect(_on_camera_distance_changed)
 	panel.grow_step_pressed.connect(_on_grow_step_pressed)
 	panel.main_menu_pressed.connect(_go_main_menu)
+	panel.colonization_changed.connect(_on_colonization_changed)
+	panel.reseed_attractors_pressed.connect(_on_reseed_attractors_pressed)
+
+	if not _graph.graph_changed.is_connected(_on_graph_changed):
+		_graph.graph_changed.connect(_on_graph_changed)
 
 	renderer.setup(_graph, _species)
 	renderer.branch_clicked.connect(_on_branch_clicked)
@@ -46,16 +49,30 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if not _auto_grow or _params == null:
 		return
-	_graph.grow(delta, _pattern, true, _grow_speed, 1.0)
+	_graph.grow(delta, _pattern, 1.0, _grow_speed, 1.0)
 	_update_camera_focus()
+
+
+func _on_graph_changed() -> void:
+	if renderer != null:
+		renderer.rebuild()
 
 
 func _apply_preset(index: int, reset_tree: bool) -> void:
 	_current_preset = index
+	_species = LSystemPresets.species_for_preset(index)
+	_pattern = LSystemPresets.pattern_for_preset(index).duplicate()
 	_params = LSystemPresets.load_preset(index)
+	if _species == null or _params == null or _pattern == null:
+		push_error("Tree Lab failed to load preset %d" % index)
+		return
 	_apply_random_factor()
 	_sync_pattern_from_params()
+	_apply_foliage_from_params()
 	panel.sync_from_params(_params, index, _random_factor)
+	renderer.setup(_graph, _species)
+	_apply_renderer_mesh_mode_for_preset(index)
+	_apply_display_settings()
 	if reset_tree:
 		_reset_tree()
 
@@ -65,6 +82,13 @@ func _sync_pattern_from_params() -> void:
 		return
 	_params.apply_to_grow_pattern(_pattern)
 	GrowthLimits.clamp_pattern(_pattern)
+
+
+func _apply_foliage_from_params() -> void:
+	if _params == null or _species == null:
+		return
+	_params.apply_foliage_to_preset(_species.foliage)
+	_params.apply_foliage_timing_to_pattern(_pattern)
 
 
 func _apply_random_factor() -> void:
@@ -82,6 +106,7 @@ func _on_apply_pressed(params: LSystemParams) -> void:
 	_apply_random_factor()
 	_params.clamp_values()
 	_sync_pattern_from_params()
+	_apply_foliage_from_params()
 	panel.sync_from_params(_params, _current_preset, _random_factor)
 	_reset_tree()
 
@@ -101,6 +126,7 @@ func _on_random_factor_changed(value: float) -> void:
 	_params = panel.collect_params()
 	_apply_random_factor()
 	_sync_pattern_from_params()
+	_apply_foliage_from_params()
 	panel.sync_from_params(_params, _current_preset, _random_factor)
 
 
@@ -108,6 +134,16 @@ func _on_auxin_changed() -> void:
 	_params = panel.collect_params()
 	_apply_random_factor()
 	_sync_pattern_from_params()
+	_apply_foliage_from_params()
+
+
+func _on_foliage_changed() -> void:
+	_params = panel.collect_params()
+	_apply_random_factor()
+	_sync_pattern_from_params()
+	_apply_foliage_from_params()
+	renderer.setup(_graph, _species)
+	renderer.rebuild()
 
 
 func _on_tool_mode_changed(mode: int) -> void:
@@ -152,6 +188,39 @@ func _apply_display_settings() -> void:
 		renderer.set_show_wood_wireframe(panel.show_wireframe())
 	if renderer.has_method("set_show_centerlines"):
 		renderer.set_show_centerlines(panel.show_centerlines())
+	if renderer.has_method("set_show_attractor_points"):
+		renderer.set_show_attractor_points(panel.show_attractors())
+	if renderer.has_method("set_show_foliage"):
+		renderer.set_show_foliage(panel.show_foliage())
+
+
+func _apply_renderer_mesh_mode_for_preset(index: int) -> void:
+	if not renderer.has_method("set_branch_mesh_mode"):
+		return
+	var ring_loft: int = TreeRenderer.BranchMeshMode.RING_LOFT
+	var decimated: int = TreeRenderer.BranchMeshMode.DECIMATED_CYLINDERS
+	if index == 2:
+		renderer.set_branch_mesh_mode(ring_loft)
+	else:
+		renderer.set_branch_mesh_mode(decimated)
+
+
+func _on_colonization_changed() -> void:
+	_params = panel.collect_params()
+	_apply_random_factor()
+	_sync_pattern_from_params()
+	_apply_foliage_from_params()
+	_graph.init_attractors_from_preset(_pattern)
+	renderer.rebuild()
+
+
+func _on_reseed_attractors_pressed() -> void:
+	_params = panel.collect_params()
+	_apply_random_factor()
+	_sync_pattern_from_params()
+	_apply_foliage_from_params()
+	_graph.reseed_attractors_from_preset(_pattern)
+	renderer.rebuild()
 
 
 func _on_branch_clicked(branch_id: int, hit_position: Vector3) -> void:
@@ -210,8 +279,10 @@ func _reset_tree() -> void:
 	_params = panel.collect_params()
 	_apply_random_factor()
 	_sync_pattern_from_params()
+	_apply_foliage_from_params()
 	_graph.create_from_lab_pattern(_species, _pattern)
 	_graph._update_auxin(_pattern)
+	renderer.setup(_graph, _species)
 	renderer.rebuild()
 	_update_camera_focus()
 	panel.set_grow_step_enabled(true)

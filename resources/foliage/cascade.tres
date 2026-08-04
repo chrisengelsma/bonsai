@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="FoliagePreset" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/tree/foliage_preset.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+mesh_style = 1
+placement = 1
+instances_per_tip = Vector2i(1, 2)
+segment_scatter_count = 4
+scale_range = Vector2(0.65, 1.0)
+droop_deg = 18.0
+albedo_color = Color(0.38, 0.52, 0.4, 1)
+underside_darken = 0.18
+hue_jitter = 0.05
+sway_amount = 0.018
+sway_speed = 0.95
+tilt_sensitivity = 1.0
+dead_leaf_color = Color(0.4, 0.27, 0.13, 1)
+dead_leaf_scale = 0.95
+leaf_start_ratio = 0.06
+leaf_end_ratio = 0.98
+min_branch_depth = 2
+max_branch_thickness = 0.03

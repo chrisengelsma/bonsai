@@ -14,7 +14,8 @@ static func interpret_production(
 	pattern,
 	rng: RandomNumberGenerator,
 	deterministic: bool,
-	mode: Mode
+	mode: Mode,
+	colonization_context: Dictionary = {}
 ) -> Dictionary:
 	var heading: Vector3 = frame.heading
 	var left: Vector3 = frame.left
@@ -84,6 +85,11 @@ static func interpret_production(
 			_:
 				if mode == Mode.GROW and LSystemSymbols.is_module_symbol(symbol):
 					var spawn_dir: Vector3 = spread_direction(heading, pattern, rng, deterministic)
+					spawn_dir = _blend_colonization_direction(
+						spawn_dir,
+						colonization_context,
+						pattern
+					)
 					spawns.append({
 						"direction": spawn_dir,
 						"lsymbol": symbol,
@@ -146,3 +152,21 @@ static func turtle_up_for_spawn(
 		rng,
 		pattern.lateral_roll_spread_deg
 	)
+
+
+static func _blend_colonization_direction(
+	direction: Vector3,
+	colonization_context: Dictionary,
+	pattern
+) -> Vector3:
+	if not pattern.use_space_colonization:
+		return direction.normalized()
+	var field = colonization_context.get("field")
+	if field == null:
+		return direction.normalized()
+	var spawn_origin: Vector3 = colonization_context.get("spawn_origin", Vector3.ZERO)
+	var attract_dir: Vector3 = field.attraction_at_position(spawn_origin)
+	if attract_dir.length_squared() <= 0.0001:
+		return direction.normalized()
+	var blend: float = clampf(pattern.colonization_spawn_strength, 0.0, 1.0)
+	return (direction.normalized() + attract_dir * blend).normalized()

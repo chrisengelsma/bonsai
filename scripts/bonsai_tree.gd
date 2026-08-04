@@ -2,6 +2,7 @@ extends Node3D
 
 const TreeEditorScript = preload("res://scripts/tree/tree_editor.gd")
 const RootSceneController = preload("res://scripts/roots/root_scene_controller.gd")
+const BasalForm = preload("res://scripts/tree/basal_form.gd")
 
 @onready var pot: Node3D = $Pot
 @onready var renderer: Node3D = $TreeRenderer
@@ -38,8 +39,20 @@ func _on_species_changed(new_species) -> void:
 	_species = new_species
 	if GameState.tree_graph:
 		renderer.setup(GameState.tree_graph, _species)
+		_apply_renderer_mesh_mode(_species)
 		tree_editor.setup(GameState.tree_graph, renderer)
 	_configure_roots()
+
+
+func _apply_renderer_mesh_mode(species) -> void:
+	if renderer == null or not renderer.has_method("set_branch_mesh_mode"):
+		return
+	var ring_loft: int = TreeRenderer.BranchMeshMode.RING_LOFT
+	var decimated: int = TreeRenderer.BranchMeshMode.DECIMATED_CYLINDERS
+	if species != null and str(species.basal_form) == BasalForm.GINSENG_CAUDEX:
+		renderer.set_branch_mesh_mode(ring_loft)
+	else:
+		renderer.set_branch_mesh_mode(decimated)
 
 
 func _configure_roots() -> void:
@@ -60,7 +73,7 @@ func _configure_roots() -> void:
 func _accumulate_root_growth_time(delta: float) -> void:
 	if GameState.config == null or GameState.tree_graph == null or GameState.is_watering():
 		return
-	if GameState.moisture < GameState.config.growth_threshold:
+	if GameState.get_moisture_growth_factor() <= 0.0:
 		return
 
 	var soil = CatalogRegistry.get_equipped_soil()

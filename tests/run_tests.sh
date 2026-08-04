@@ -7,6 +7,11 @@ TESTS=(
 	"tests/test_bark_winding.gd"
 	"tests/test_axial_growth.gd"
 	"tests/test_lsystem_model.gd"
+	"tests/test_crown_attractor_field.gd"
+	"tests/test_moisture_care.gd"
+	"tests/test_dead_leaf_model.gd"
+	"tests/test_basal_form.gd"
+	"tests/test_caudex_arcs.gd"
 )
 
 failed=0

@@ -22,13 +22,20 @@ static func apply_at_tip(graph, tip_id: int, pattern) -> void:
 	var deterministic: bool = pattern.deterministic_growth or not tip.stochastic_direction
 	var rng: RandomNumberGenerator = graph.get_rng() if not deterministic else null
 	var frame: Dictionary = LSystemTurtle.init_frame(tip.direction, tip.turtle_up)
+	var colonization_context: Dictionary = {}
+	if pattern.use_space_colonization and graph.get_attractor_field() != null:
+		colonization_context = {
+			"field": graph.get_attractor_field(),
+			"spawn_origin": graph.get_world_tip(tip_id),
+		}
 	var result: Dictionary = LSystemTurtle.interpret_production(
 		production,
 		frame,
 		pattern,
 		rng,
 		deterministic,
-		LSystemTurtle.Mode.GROW
+		LSystemTurtle.Mode.GROW,
+		colonization_context
 	)
 
 	for spawn in AuxinModel.filter_lateral_spawns(graph, tip_id, result.spawns, pattern, rng):

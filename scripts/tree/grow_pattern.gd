@@ -36,10 +36,25 @@ extends Resource
 @export var foliage_start_length: float = 0.08
 @export var foliage_growth_rate: float = 0.15
 @export var gravity_curve: float = 0.0
+@export var use_space_colonization: bool = false
+@export var colonization_strength: float = 0.35
+@export var colonization_spawn_strength: float = 0.25
+@export var colonization_influence_radius: float = 0.42
+@export var colonization_kill_distance: float = 0.06
+@export var colonization_point_count: int = 120
+@export var colonization_volume_preset: String = "dome"
 @export var regrowth_delay: float = 2.0
 @export var regrowth_chance: float = 0.4
 @export var trunk_thickness: float = 0.022
 @export var branch_thickness: float = 0.009
+
+## Mid-segment swell on nodes marked is_basal_leg (ginseng caudex legs).
+@export var basal_bulge_strength: float = 0.0
+## Extra radius cap multiplier at depth 0 when basal form is active.
+@export var basal_radius_mult: float = 1.7
+## Cambium rate multiplier on basal leg nodes.
+@export var basal_cambium_mult: float = 1.0
+@export var basal_arc_count: int = 3
 
 var _rules_cache: Dictionary = {}
 

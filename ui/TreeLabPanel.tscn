@@ -212,6 +212,92 @@ layout_mode = 2
 title = "Auxin Competition"
 folded = false
 
+[node name="CrownSection" type="FoldableContainer" parent="Panel/Scroll/VBox"]
+layout_mode = 2
+title = "Crown Silhouette"
+folded = false
+
+[node name="CrownVBox" type="VBoxContainer" parent="Panel/Scroll/VBox/CrownSection"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="ColonizationToggle" type="CheckButton" parent="Panel/Scroll/VBox/CrownSection/CrownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Use space colonization"
+
+[node name="VolumePresetOption" type="OptionButton" parent="Panel/Scroll/VBox/CrownSection/CrownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ColonStrengthLabel" type="Label" parent="Panel/Scroll/VBox/CrownSection/CrownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Tip strength: 0.35"
+
+[node name="ColonStrengthSlider" type="HSlider" parent="Panel/Scroll/VBox/CrownSection/CrownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 1.0
+step = 0.05
+value = 0.35
+
+[node name="ColonSpawnLabel" type="Label" parent="Panel/Scroll/VBox/CrownSection/CrownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Spawn strength: 0.25"
+
+[node name="ColonSpawnSlider" type="HSlider" parent="Panel/Scroll/VBox/CrownSection/CrownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 1.0
+step = 0.05
+value = 0.25
+
+[node name="ColonInfluenceLabel" type="Label" parent="Panel/Scroll/VBox/CrownSection/CrownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Influence radius: 0.42"
+
+[node name="ColonInfluenceSlider" type="HSlider" parent="Panel/Scroll/VBox/CrownSection/CrownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.08
+max_value = 0.9
+step = 0.02
+value = 0.42
+
+[node name="ColonKillLabel" type="Label" parent="Panel/Scroll/VBox/CrownSection/CrownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Kill distance: 0.06"
+
+[node name="ColonKillSlider" type="HSlider" parent="Panel/Scroll/VBox/CrownSection/CrownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.02
+max_value = 0.2
+step = 0.01
+value = 0.06
+
+[node name="ColonCountLabel" type="Label" parent="Panel/Scroll/VBox/CrownSection/CrownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Attractor count: 120"
+
+[node name="ColonCountSlider" type="HSlider" parent="Panel/Scroll/VBox/CrownSection/CrownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 20.0
+max_value = 300.0
+step = 10.0
+value = 120.0
+
+[node name="ReseedAttractorsButton" type="Button" parent="Panel/Scroll/VBox/CrownSection/CrownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Reseed attractors"
+
 [node name="AuxinVBox" type="VBoxContainer" parent="Panel/Scroll/VBox/AuxinSection"]
 layout_mode = 2
 theme_override_constants/separation = 6
@@ -359,6 +445,87 @@ layout_mode = 2
 title = "Tools"
 folded = false
 
+[node name="FoliageSection" type="FoldableContainer" parent="Panel/Scroll/VBox"]
+layout_mode = 2
+title = "Foliage"
+folded = true
+
+[node name="FoliageVBox" type="VBoxContainer" parent="Panel/Scroll/VBox/FoliageSection"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="FoliageEnabledToggle" type="CheckButton" parent="Panel/Scroll/VBox/FoliageSection/FoliageVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
+text = "Enable foliage"
+
+[node name="FoliageStyleLabel" type="Label" parent="Panel/Scroll/VBox/FoliageSection/FoliageVBox"]
+layout_mode = 2
+text = "Mesh style"
+
+[node name="FoliageStyleOption" type="OptionButton" parent="Panel/Scroll/VBox/FoliageSection/FoliageVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="FoliagePlacementLabel" type="Label" parent="Panel/Scroll/VBox/FoliageSection/FoliageVBox"]
+layout_mode = 2
+text = "Placement"
+
+[node name="FoliagePlacementOption" type="OptionButton" parent="Panel/Scroll/VBox/FoliageSection/FoliageVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="FoliageGrowthLabel" type="Label" parent="Panel/Scroll/VBox/FoliageSection/FoliageVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Foliage growth: 0.18"
+
+[node name="FoliageGrowthSlider" type="HSlider" parent="Panel/Scroll/VBox/FoliageSection/FoliageVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 0.5
+step = 0.01
+value = 0.18
+
+[node name="FoliageStartLabel" type="Label" parent="Panel/Scroll/VBox/FoliageSection/FoliageVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Foliage start: 0.06"
+
+[node name="FoliageStartSlider" type="HSlider" parent="Panel/Scroll/VBox/FoliageSection/FoliageVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.01
+max_value = 0.2
+step = 0.005
+value = 0.06
+
+[node name="FoliageSwayLabel" type="Label" parent="Panel/Scroll/VBox/FoliageSection/FoliageVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Foliage sway: 0.020"
+
+[node name="FoliageSwaySlider" type="HSlider" parent="Panel/Scroll/VBox/FoliageSection/FoliageVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 0.08
+step = 0.001
+value = 0.02
+
+[node name="FoliageScaleLabel" type="Label" parent="Panel/Scroll/VBox/FoliageSection/FoliageVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Foliage scale: 1.00"
+
+[node name="FoliageScaleSlider" type="HSlider" parent="Panel/Scroll/VBox/FoliageSection/FoliageVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.2
+max_value = 1.5
+step = 0.05
+value = 1.0
+
 [node name="DisplaySection" type="FoldableContainer" parent="Panel/Scroll/VBox"]
 layout_mode = 2
 title = "Display"
@@ -377,6 +544,17 @@ text = "Wireframe mesh"
 unique_name_in_owner = true
 layout_mode = 2
 text = "Centerlines"
+
+[node name="AttractorToggle" type="CheckButton" parent="Panel/Scroll/VBox/DisplaySection/DisplayVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Show attractor points"
+
+[node name="FoliageToggle" type="CheckButton" parent="Panel/Scroll/VBox/DisplaySection/DisplayVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
+text = "Show foliage"
 
 [node name="CameraDistanceLabel" type="Label" parent="Panel/Scroll/VBox/DisplaySection/DisplayVBox"]
 unique_name_in_owner = true

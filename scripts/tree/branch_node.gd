@@ -9,6 +9,9 @@ var thickness: float = 0.03
 var age: float = 0.0
 var growth_energy: float = 1.0
 var foliage_amount: float = 0.0
+var has_dead_leaf: bool = false
+var is_basal_leg: bool = false
+var is_caudex_anchor: bool = false
 var is_growing_tip: bool = true
 var freeze_length: bool = false
 var prune_seed_pending: bool = false
@@ -43,6 +46,9 @@ func to_dict() -> Dictionary:
 		"age": age,
 		"growth_energy": growth_energy,
 		"foliage_amount": foliage_amount,
+		"has_dead_leaf": has_dead_leaf,
+		"is_basal_leg": is_basal_leg,
+		"is_caudex_anchor": is_caudex_anchor,
 		"is_growing_tip": is_growing_tip,
 		"freeze_length": freeze_length,
 		"prune_seed_pending": prune_seed_pending,
@@ -92,6 +98,9 @@ static func from_dict(data: Dictionary):
 	node.age = float(data.get("age", 0.0))
 	node.growth_energy = float(data.get("growth_energy", 1.0))
 	node.foliage_amount = float(data.get("foliage_amount", 0.0))
+	node.has_dead_leaf = bool(data.get("has_dead_leaf", false))
+	node.is_basal_leg = bool(data.get("is_basal_leg", false))
+	node.is_caudex_anchor = bool(data.get("is_caudex_anchor", false))
 	node.is_growing_tip = bool(data.get("is_growing_tip", true))
 	node.freeze_length = bool(data.get("freeze_length", false))
 	node.prune_seed_pending = bool(data.get("prune_seed_pending", false))

@@ -50,6 +50,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_on_tool_mode_selected(1)
 	if event.is_action_pressed("tool_graft"):
 		_on_tool_mode_selected(2)
+	if event.is_action_pressed("tool_tend"):
+		_on_tool_mode_selected(3)
 
 
 func _on_water_pressed() -> void:

@@ -53,6 +53,15 @@ static func clamp_pattern(pattern) -> void:
 	pattern.pipe_exponent = clampf(pattern.pipe_exponent, 1.5, 3.0)
 	pattern.segment_taper_power = clampf(pattern.segment_taper_power, 0.7, 2.0)
 	pattern.terminal_taper_ratio = clampf(pattern.terminal_taper_ratio, 0.35, 0.95)
+	pattern.basal_bulge_strength = clampf(pattern.basal_bulge_strength, 0.0, 0.65)
+	pattern.basal_radius_mult = clampf(pattern.basal_radius_mult, 1.0, 3.5)
+	pattern.basal_cambium_mult = clampf(pattern.basal_cambium_mult, 0.1, 3.0)
+	pattern.basal_arc_count = clampi(pattern.basal_arc_count, 2, 4)
+	pattern.colonization_strength = clampf(pattern.colonization_strength, 0.0, 1.0)
+	pattern.colonization_spawn_strength = clampf(pattern.colonization_spawn_strength, 0.0, 1.0)
+	pattern.colonization_influence_radius = clampf(pattern.colonization_influence_radius, 0.08, 0.9)
+	pattern.colonization_kill_distance = clampf(pattern.colonization_kill_distance, 0.02, 0.2)
+	pattern.colonization_point_count = clampi(pattern.colonization_point_count, 20, 300)
 
 
 static func max_length_for_depth(depth: int) -> float:
@@ -70,6 +79,8 @@ static func max_length_for_depth(depth: int) -> float:
 static func max_radius_for_depth(depth: int, pattern) -> float:
 	var base: float = pattern.trunk_thickness if depth == 0 else pattern.branch_thickness
 	var mult: float = MAX_TRUNK_THICKNESS_MULT if depth == 0 else MAX_BRANCH_THICKNESS_MULT
+	if depth == 0 and pattern.basal_radius_mult > mult:
+		mult = pattern.basal_radius_mult
 	return base * mult
 
 

@@ -3,6 +3,7 @@ extends Node
 const TreeGraphScript = preload("res://scripts/tree/tree_graph.gd")
 const GameConfigScript = preload("res://scripts/game_config.gd")
 const GrowthLimits = preload("res://scripts/tree/growth_limits.gd")
+const MoistureCare = preload("res://scripts/tree/moisture_care.gd")
 
 signal moisture_changed(value: float)
 signal growth_status_changed(is_growing: bool)
@@ -52,14 +53,38 @@ func _process(delta: float) -> void:
 	moisture = maxf(0.0, moisture - config.moisture_decay_per_second * decay_mult * delta)
 	moisture_changed.emit(moisture)
 
-	var moisture_ok: bool = moisture >= config.growth_threshold
-	if moisture_ok and tree_graph and species and not _is_watering:
+	var moisture_factor: float = get_moisture_growth_factor()
+	if moisture_factor > 0.0 and tree_graph and species and not _is_watering:
 		var soil_mult: float = soil.growth_mult if soil else 1.0
-		tree_graph.grow(delta, species.grow_pattern, true, grow_speed_multiplier, soil_mult)
+		tree_graph.grow(delta, species.grow_pattern, moisture_factor, grow_speed_multiplier, soil_mult)
 		_set_growing(true)
 		maturity_changed.emit(tree_graph.get_maturity_label())
 	else:
 		_set_growing(false)
+
+
+func get_moisture_growth_factor() -> float:
+	return MoistureCare.growth_factor(moisture, config.growth_threshold)
+
+
+func get_moisture_status_label() -> String:
+	return MoistureCare.moisture_status_label(moisture, config.growth_threshold)
+
+
+func get_growth_status_label() -> String:
+	return MoistureCare.growth_status_label(moisture, config.growth_threshold)
+
+
+func tend_dead_leaf(tip_id: int) -> bool:
+	if tree_graph == null:
+		return false
+	if not tree_graph.tend_dead_leaf_at_tip(tip_id):
+		return false
+	moisture = MoistureCare.apply_tend_moisture_bump(moisture)
+	moisture_changed.emit(moisture)
+	AudioManager.play_sfx("growth")
+	graph_changed.emit()
+	return true
 
 
 func _set_growing(value: bool) -> void:
@@ -138,9 +163,10 @@ func _apply_offline_progress(data: Dictionary) -> void:
 	var decay_mult: float = soil.moisture_decay_mult if soil else 1.0
 	moisture = maxf(0.0, moisture - config.moisture_decay_per_second * decay_mult * elapsed)
 
-	if moisture >= config.growth_threshold and tree_graph and species:
+	var moisture_factor: float = get_moisture_growth_factor()
+	if moisture_factor > 0.0 and tree_graph and species:
 		var soil_mult: float = soil.growth_mult if soil else 1.0
-		tree_graph.grow(elapsed, species.grow_pattern, true, grow_speed_multiplier, soil_mult)
+		tree_graph.grow(elapsed, species.grow_pattern, moisture_factor, grow_speed_multiplier, soil_mult)
 
 
 func build_save_data() -> Dictionary:
