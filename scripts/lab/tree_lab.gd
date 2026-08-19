@@ -33,8 +33,12 @@ func _ready() -> void:
 	panel.camera_distance_changed.connect(_on_camera_distance_changed)
 	panel.grow_step_pressed.connect(_on_grow_step_pressed)
 	panel.main_menu_pressed.connect(_go_main_menu)
+	panel.leaf_lab_pressed.connect(_go_leaf_lab)
 	panel.colonization_changed.connect(_on_colonization_changed)
 	panel.reseed_attractors_pressed.connect(_on_reseed_attractors_pressed)
+	panel.caudex_arc_count_changed.connect(_on_caudex_arc_count_changed)
+	panel.caudex_height_changed.connect(_on_caudex_height_changed)
+	panel.caudex_spread_changed.connect(_on_caudex_spread_changed)
 
 	if not _graph.graph_changed.is_connected(_on_graph_changed):
 		_graph.graph_changed.connect(_on_graph_changed)
@@ -69,7 +73,7 @@ func _apply_preset(index: int, reset_tree: bool) -> void:
 	_apply_random_factor()
 	_sync_pattern_from_params()
 	_apply_foliage_from_params()
-	panel.sync_from_params(_params, index, _random_factor)
+	panel.sync_from_params(_params, index, _random_factor, _pattern)
 	renderer.setup(_graph, _species)
 	_apply_renderer_mesh_mode_for_preset(index)
 	_apply_display_settings()
@@ -107,7 +111,7 @@ func _on_apply_pressed(params: LSystemParams) -> void:
 	_params.clamp_values()
 	_sync_pattern_from_params()
 	_apply_foliage_from_params()
-	panel.sync_from_params(_params, _current_preset, _random_factor)
+	panel.sync_from_params(_params, _current_preset, _random_factor, _pattern)
 	_reset_tree()
 
 
@@ -127,7 +131,7 @@ func _on_random_factor_changed(value: float) -> void:
 	_apply_random_factor()
 	_sync_pattern_from_params()
 	_apply_foliage_from_params()
-	panel.sync_from_params(_params, _current_preset, _random_factor)
+	panel.sync_from_params(_params, _current_preset, _random_factor, _pattern)
 
 
 func _on_auxin_changed() -> void:
@@ -197,12 +201,30 @@ func _apply_display_settings() -> void:
 func _apply_renderer_mesh_mode_for_preset(index: int) -> void:
 	if not renderer.has_method("set_branch_mesh_mode"):
 		return
-	var ring_loft: int = TreeRenderer.BranchMeshMode.RING_LOFT
-	var decimated: int = TreeRenderer.BranchMeshMode.DECIMATED_CYLINDERS
-	if index == 2:
-		renderer.set_branch_mesh_mode(ring_loft)
-	else:
-		renderer.set_branch_mesh_mode(decimated)
+	renderer.set_branch_mesh_mode(TreeRenderer.BranchMeshMode.DECIMATED_CYLINDERS)
+
+
+func _on_caudex_arc_count_changed(value: int) -> void:
+	if _pattern == null:
+		return
+	_pattern.basal_arc_count = clampi(value, 1, 4)
+	_reset_tree()
+
+
+func _on_caudex_height_changed(value: float) -> void:
+	if _pattern == null:
+		return
+	_pattern.caudex_max_height = value
+	GrowthLimits.clamp_pattern(_pattern)
+	_reset_tree()
+
+
+func _on_caudex_spread_changed(value: float) -> void:
+	if _pattern == null:
+		return
+	_pattern.basal_radius_mult = value
+	GrowthLimits.clamp_pattern(_pattern)
+	_reset_tree()
 
 
 func _on_colonization_changed() -> void:
@@ -299,3 +321,7 @@ func _update_camera_focus() -> void:
 
 func _go_main_menu() -> void:
 	get_tree().change_scene_to_file("res://Main.tscn")
+
+
+func _go_leaf_lab() -> void:
+	get_tree().change_scene_to_file("res://scenes/lab/LeafLab.tscn")

@@ -17,11 +17,21 @@ signal display_changed
 signal camera_distance_changed(value: float)
 signal grow_step_pressed
 signal main_menu_pressed
+signal leaf_lab_pressed
 signal colonization_changed
 signal reseed_attractors_pressed
 signal foliage_changed
+signal caudex_arc_count_changed(value: int)
+signal caudex_height_changed(value: float)
+signal caudex_spread_changed(value: float)
 
 @onready var preset_option: OptionButton = %PresetOption
+@onready var caudex_roots_label: Label = %CaudexRootsLabel
+@onready var caudex_roots_slider: HSlider = %CaudexRootsSlider
+@onready var caudex_height_label: Label = %CaudexHeightLabel
+@onready var caudex_height_slider: HSlider = %CaudexHeightSlider
+@onready var caudex_spread_label: Label = %CaudexSpreadLabel
+@onready var caudex_spread_slider: HSlider = %CaudexSpreadSlider
 @onready var axiom_field: LineEdit = %AxiomField
 @onready var rules_field: TextEdit = %RulesField
 @onready var angle_slider: HSlider = %AngleSlider
@@ -95,6 +105,7 @@ signal foliage_changed
 @onready var grow_step_button: Button = %GrowStepButton
 @onready var apply_button: Button = %ApplyButton
 @onready var reset_button: Button = %ResetButton
+@onready var leaf_lab_button: Button = %LeafLabButton
 @onready var main_button: Button = %MainButton
 @onready var panel: PanelContainer = %Panel
 
@@ -108,6 +119,9 @@ func _ready() -> void:
 	_populate_foliage_options()
 
 	preset_option.item_selected.connect(_on_preset_selected)
+	caudex_roots_slider.value_changed.connect(_on_caudex_roots_changed)
+	caudex_height_slider.value_changed.connect(_on_caudex_height_changed)
+	caudex_spread_slider.value_changed.connect(_on_caudex_spread_changed)
 	angle_slider.value_changed.connect(_on_angle_changed)
 	segment_slider.value_changed.connect(_on_segment_changed)
 	growth_slider.value_changed.connect(_on_growth_changed)
@@ -151,6 +165,7 @@ func _ready() -> void:
 	grow_step_button.pressed.connect(func(): grow_step_pressed.emit())
 	apply_button.pressed.connect(_emit_apply)
 	reset_button.pressed.connect(func(): reset_pressed.emit())
+	leaf_lab_button.pressed.connect(func(): leaf_lab_pressed.emit())
 	main_button.pressed.connect(func(): main_menu_pressed.emit())
 
 	get_viewport().size_changed.connect(_apply_mobile_layout)
@@ -179,12 +194,18 @@ func _populate_foliage_options() -> void:
 		foliage_placement_option.add_item(name)
 
 
-func sync_from_params(params: LSystemParams, preset_index: int, random_factor: float = 0.0) -> void:
+func sync_from_params(
+	params: LSystemParams,
+	preset_index: int,
+	random_factor: float = 0.0,
+	pattern = null
+) -> void:
 	if params == null:
 		return
 	_syncing = true
 	if preset_index >= 0 and preset_index < preset_option.item_count:
 		preset_option.select(preset_index)
+	_sync_caudex_controls(preset_index, pattern)
 	axiom_field.text = params.axiom
 	rules_field.text = params.rules_text
 	angle_slider.value = params.angle_deg
@@ -366,6 +387,51 @@ func _on_preset_selected(index: int) -> void:
 	if _syncing:
 		return
 	preset_selected.emit(index)
+
+
+func _on_caudex_roots_changed(value: float) -> void:
+	var count: int = clampi(int(value), 1, 4)
+	caudex_roots_label.text = "Caudex roots: %d" % count
+	if not _syncing:
+		caudex_arc_count_changed.emit(count)
+
+
+func _on_caudex_height_changed(value: float) -> void:
+	caudex_height_label.text = "Caudex height: %.2f" % value
+	if not _syncing:
+		caudex_height_changed.emit(value)
+
+
+func _on_caudex_spread_changed(value: float) -> void:
+	caudex_spread_label.text = "Caudex spread: %.2f" % value
+	if not _syncing:
+		caudex_spread_changed.emit(value)
+
+
+func _sync_caudex_controls(preset_index: int, pattern) -> void:
+	var show_controls: bool = LSystemPresets.is_ginseng_preset(preset_index)
+	caudex_roots_label.visible = show_controls
+	caudex_roots_slider.visible = show_controls
+	caudex_height_label.visible = show_controls
+	caudex_height_slider.visible = show_controls
+	caudex_spread_label.visible = show_controls
+	caudex_spread_slider.visible = show_controls
+	if not show_controls or pattern == null:
+		return
+	caudex_roots_slider.value = clampi(pattern.basal_arc_count, 1, 4)
+	caudex_roots_label.text = "Caudex roots: %d" % int(caudex_roots_slider.value)
+	caudex_height_slider.value = clampf(
+		float(pattern.caudex_max_height),
+		caudex_height_slider.min_value,
+		caudex_height_slider.max_value
+	)
+	caudex_height_label.text = "Caudex height: %.2f" % caudex_height_slider.value
+	caudex_spread_slider.value = clampf(
+		float(pattern.basal_radius_mult),
+		caudex_spread_slider.min_value,
+		caudex_spread_slider.max_value
+	)
+	caudex_spread_label.text = "Caudex spread: %.2f" % caudex_spread_slider.value
 
 
 func _on_display_changed(_enabled: bool = false) -> void:

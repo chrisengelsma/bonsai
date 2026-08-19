@@ -13,6 +13,14 @@ const MAX_TRUNK_LENGTH := 0.95
 const MAX_PRIMARY_LENGTH := 0.55
 const MAX_SECONDARY_LENGTH := 0.38
 const MAX_TWIG_LENGTH := 0.28
+
+## Compact crown above a ginseng caudex — branches stay short and pad-like.
+const CAUDEX_CROWN_LENGTH := 0.18
+const CAUDEX_PRIMARY_LENGTH := 0.14
+const CAUDEX_SECONDARY_LENGTH := 0.1
+const CAUDEX_TWIG_LENGTH := 0.07
+const CAUDEX_MAX_TREE_HEIGHT := 0.78
+
 const MAX_TRUNK_THICKNESS_MULT := 1.7
 const MAX_BRANCH_THICKNESS_MULT := 1.45
 
@@ -54,9 +62,11 @@ static func clamp_pattern(pattern) -> void:
 	pattern.segment_taper_power = clampf(pattern.segment_taper_power, 0.7, 2.0)
 	pattern.terminal_taper_ratio = clampf(pattern.terminal_taper_ratio, 0.35, 0.95)
 	pattern.basal_bulge_strength = clampf(pattern.basal_bulge_strength, 0.0, 0.65)
-	pattern.basal_radius_mult = clampf(pattern.basal_radius_mult, 1.0, 3.5)
+	pattern.basal_radius_mult = clampf(pattern.basal_radius_mult, 1.0, 5.0)
 	pattern.basal_cambium_mult = clampf(pattern.basal_cambium_mult, 0.1, 3.0)
-	pattern.basal_arc_count = clampi(pattern.basal_arc_count, 2, 4)
+	pattern.basal_arc_count = clampi(pattern.basal_arc_count, 1, 4)
+	pattern.caudex_growth_mult = clampf(pattern.caudex_growth_mult, 0.05, 2.0)
+	pattern.caudex_max_height = clampf(pattern.caudex_max_height, 0.12, 0.95)
 	pattern.colonization_strength = clampf(pattern.colonization_strength, 0.0, 1.0)
 	pattern.colonization_spawn_strength = clampf(pattern.colonization_spawn_strength, 0.0, 1.0)
 	pattern.colonization_influence_radius = clampf(pattern.colonization_influence_radius, 0.08, 0.9)
@@ -64,7 +74,19 @@ static func clamp_pattern(pattern) -> void:
 	pattern.colonization_point_count = clampi(pattern.colonization_point_count, 20, 300)
 
 
-static func max_length_for_depth(depth: int) -> float:
+static func max_length_for_depth(depth: int, has_caudex: bool = false) -> float:
+	if has_caudex:
+		match depth:
+			0, 1:
+				return CAUDEX_CROWN_LENGTH
+			2:
+				return CAUDEX_CROWN_LENGTH
+			3:
+				return CAUDEX_PRIMARY_LENGTH
+			4:
+				return CAUDEX_SECONDARY_LENGTH
+			_:
+				return CAUDEX_TWIG_LENGTH
 	match depth:
 		0:
 			return MAX_TRUNK_LENGTH
@@ -74,6 +96,12 @@ static func max_length_for_depth(depth: int) -> float:
 			return MAX_SECONDARY_LENGTH
 		_:
 			return MAX_TWIG_LENGTH
+
+
+static func max_tree_height(has_caudex: bool = false) -> float:
+	if has_caudex:
+		return CAUDEX_MAX_TREE_HEIGHT
+	return MAX_TREE_HEIGHT
 
 
 static func max_radius_for_depth(depth: int, pattern) -> float:

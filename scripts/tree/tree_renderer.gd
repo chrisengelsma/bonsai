@@ -11,10 +11,11 @@ const FoliageMeshBuilder = preload("res://scripts/tree/foliage_mesh_builder.gd")
 const FoliageRenderer = preload("res://scripts/tree/foliage_renderer.gd")
 const MeshConstants = preload("res://scripts/util/mesh_constants.gd")
 const Vector3Frame = preload("res://scripts/util/vector3_frame.gd")
+const BarkGrid = preload("res://scripts/tree/bark_grid.gd")
 
 const MAX_VISUAL_RADIUS := 0.12
 
-enum BranchMeshMode { CYLINDERS, DECIMATED_CYLINDERS, SWEPT_TUBE, RING_LOFT }
+enum BranchMeshMode { CYLINDERS, DECIMATED_CYLINDERS, SWEPT_TUBE, RING_LOFT, BARK_GRID }
 
 @export var trunk_material: Material
 @export var graft_material: Material
@@ -54,6 +55,7 @@ var _dead_leaf_material: StandardMaterial3D
 var _foliage_renderer: FoliageRenderer
 var _caudex_mesh: MeshInstance3D
 var _caudex_wire_mesh: MeshInstance3D
+var _caudex_mesh_cache: Dictionary = {}
 var _segments_root: Node3D
 var _caps_root: Node3D
 var _wireframe_root: Node3D
@@ -110,10 +112,10 @@ func _ready() -> void:
 	add_child(_foliage_renderer)
 	_caudex_mesh = MeshInstance3D.new()
 	_caudex_mesh.name = "CaudexMesh"
-	_overlay_root.add_child(_caudex_mesh)
+	_segments_root.add_child(_caudex_mesh)
 	_caudex_wire_mesh = MeshInstance3D.new()
 	_caudex_wire_mesh.name = "CaudexWireframe"
-	_overlay_root.add_child(_caudex_wire_mesh)
+	_wireframe_root.add_child(_caudex_wire_mesh)
 	_ensure_hover_ring()
 	_move_centerlines_to_front()
 	_wireframe_material = StandardMaterial3D.new()
@@ -236,9 +238,11 @@ func setup(graph, species) -> void:
 	_graph = graph
 	_species = species
 	_dead_leaf_material = null
+	_caudex_mesh_cache.clear()
 	_ensure_materials()
 	_apply_species_colors()
 	if _graph:
+		_graph.bark_radial_segments = radial_segments
 		if not _graph.graph_changed.is_connected(rebuild):
 			_graph.graph_changed.connect(rebuild)
 	rebuild()
@@ -353,6 +357,18 @@ func _rebuild_centerlines() -> void:
 		st.add_vertex(start)
 		st.add_vertex(end)
 
+	if _graph.has_caudex:
+		GinsengCaudexMesh.append_centerlines(
+			st,
+			_graph.caudex_arc_count,
+			_graph.caudex_height,
+			_graph.caudex_bulk_radius,
+			_caudex_neck_radius(),
+			24,
+			_graph.caudex_lobe_scales,
+			_graph.caudex_max_height
+		)
+
 	_ensure_centerline_material()
 	_centerline_mesh.mesh = st.commit()
 	_centerline_mesh.material_override = _centerline_material
@@ -365,41 +381,94 @@ func _rebuild_caudex_mesh() -> void:
 		return
 	if not _graph.has_caudex:
 		_caudex_mesh.visible = false
+		_caudex_mesh_cache.clear()
 		if _caudex_wire_mesh:
 			_caudex_wire_mesh.visible = false
 		return
 
-	var top_radius: float = 0.012
-	if _graph.nodes.has(_graph.root_id):
-		for child_id in _graph.nodes[_graph.root_id].children:
-			var child = _graph.nodes.get(child_id)
-			if child and not child.is_caudex_anchor:
-				top_radius = child.base_thickness + child.cambium_thickness
-				break
+	var top_radius: float = _caudex_neck_radius()
+	if not _caudex_mesh_needs_rebuild(top_radius):
+		return
 
 	var mesh: ArrayMesh = GinsengCaudexMesh.build(
 		_graph.caudex_arc_count,
 		_graph.caudex_height,
 		_graph.caudex_bulk_radius,
 		top_radius,
+		0,
+		0,
+		17,
+		_graph.caudex_lobe_scales,
+		_graph.caudex_max_height
 	)
 	_caudex_mesh.mesh = mesh
 	_ensure_materials()
 	_caudex_mesh.material_override = trunk_material
 	_caudex_mesh.visible = mesh != null
+	_store_caudex_mesh_cache(top_radius)
 
 	if _caudex_wire_mesh:
-		var wire: ArrayMesh = GinsengCaudexMesh.build_wireframe(
-			_graph.caudex_arc_count,
-			_graph.caudex_height,
-			_graph.caudex_bulk_radius,
-			top_radius,
-		)
-		_caudex_wire_mesh.mesh = wire
-		_ensure_centerline_material()
-		_caudex_wire_mesh.material_override = _centerline_material
-		_caudex_wire_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		_caudex_wire_mesh.visible = show_centerlines and wire != null
+		if show_wood_wireframe:
+			var wire_mesh: ArrayMesh = GinsengCaudexMesh.build_wireframe(
+				_graph.caudex_arc_count,
+				_graph.caudex_height,
+				_graph.caudex_bulk_radius,
+				top_radius,
+				0,
+				17,
+				_graph.caudex_lobe_scales,
+				_graph.caudex_max_height
+			)
+			_caudex_wire_mesh.mesh = wire_mesh
+			_caudex_wire_mesh.material_override = _wireframe_material
+			_caudex_wire_mesh.visible = wire_mesh != null
+		else:
+			_caudex_wire_mesh.mesh = null
+			_caudex_wire_mesh.visible = false
+
+
+func _caudex_mesh_needs_rebuild(top_radius: float) -> bool:
+	if _caudex_mesh.mesh == null or _caudex_mesh_cache.is_empty():
+		return true
+	if int(_caudex_mesh_cache.get("arc_count", -1)) != _graph.caudex_arc_count:
+		return true
+	if str(_caudex_mesh_cache.get("lobe_scales", "")) != _caudex_lobe_scales_key():
+		return true
+	if absf(_graph.caudex_height - float(_caudex_mesh_cache.get("height", -1.0))) > 0.006:
+		return true
+	if absf(_graph.caudex_bulk_radius - float(_caudex_mesh_cache.get("bulk_radius", -1.0))) > 0.005:
+		return true
+	if absf(top_radius - float(_caudex_mesh_cache.get("top_radius", -1.0))) > 0.004:
+		return true
+	return false
+
+
+func _store_caudex_mesh_cache(top_radius: float) -> void:
+	_caudex_mesh_cache = {
+		"arc_count": _graph.caudex_arc_count,
+		"height": _graph.caudex_height,
+		"bulk_radius": _graph.caudex_bulk_radius,
+		"top_radius": top_radius,
+		"lobe_scales": _caudex_lobe_scales_key(),
+	}
+
+
+func _caudex_lobe_scales_key() -> String:
+	var parts: PackedStringArray = []
+	for scale in _graph.caudex_lobe_scales:
+		parts.append("%.3f" % float(scale))
+	return ",".join(parts)
+
+
+func _caudex_neck_radius() -> float:
+	var top_radius: float = 0.012
+	if _graph != null and _graph.nodes.has(_graph.root_id):
+		for child_id in _graph.nodes[_graph.root_id].children:
+			var child = _graph.nodes.get(child_id)
+			if child and not child.is_caudex_anchor:
+				top_radius = child.base_thickness + child.cambium_thickness
+				break
+	return top_radius
 
 
 func _move_centerlines_to_front() -> void:
@@ -504,6 +573,8 @@ func _render_branch(node_id: int) -> void:
 	match branch_mesh_mode:
 		BranchMeshMode.DECIMATED_CYLINDERS:
 			_render_branch_decimated(node_id)
+		BranchMeshMode.BARK_GRID:
+			_render_branch_bark_grid(node_id)
 		BranchMeshMode.SWEPT_TUBE, BranchMeshMode.RING_LOFT:
 			_render_branch_skinned(node_id)
 		_:
@@ -566,7 +637,9 @@ func _render_branch_decimated(node_id: int) -> void:
 	var direction: Vector3 = seg.direction
 	var height: float = seg.length
 
-	var guide_samples: Array = _graph.get_bark_guide_samples(node_id, guide_ring_spacing)
+	var guide_samples: Array = _graph.get_bark_guide_samples_for_render(
+		node_id, guide_ring_spacing, height
+	)
 	if guide_samples.size() < 2:
 		_render_branch_cylinder(node_id)
 		return
@@ -668,7 +741,9 @@ func _render_branch_skinned(node_id: int) -> void:
 	var direction: Vector3 = seg.direction
 	var height: float = seg.length
 
-	var guide_samples: Array = _graph.get_bark_guide_samples(node_id, guide_ring_spacing)
+	var guide_samples: Array = _graph.get_bark_guide_samples_for_render(
+		node_id, guide_ring_spacing, height
+	)
 	if guide_samples.size() < 2:
 		_render_branch_cylinder(node_id)
 		return
@@ -684,7 +759,7 @@ func _render_branch_skinned(node_id: int) -> void:
 		wobble,
 		radial_segments,
 		densify,
-		node.length,
+		height,
 		direction,
 		guide_ring_spacing
 	)
@@ -703,6 +778,77 @@ func _render_branch_skinned(node_id: int) -> void:
 
 	if show_wood_wireframe:
 		_render_bark_wireframe(node_id, bark_meshes.get("wireframe"), start)
+
+	if node.is_graft:
+		var graft_marker := _get_graft_marker(node_id)
+		graft_marker.visible = true
+		graft_marker.position = start
+
+	if node.cut_timestamp >= 0.0:
+		_render_cut_cap(node_id, end, direction)
+
+	_update_pick_area(
+		node_id,
+		start,
+		end,
+		maxf(_get_base_radius(node_id), _get_tip_radius(node_id)) * thickness_visual_scale
+	)
+	_prune_branch_chain_pool(node_id, 0, 0)
+	_prune_wireframe_pool(node_id, 0, 0, false)
+
+
+func _render_branch_bark_grid(node_id: int) -> void:
+	var node = _graph.nodes[node_id]
+	if node.length <= MeshConstants.DIST_EPSILON:
+		return
+
+	var seg := _branch_segment(node_id)
+	var start: Vector3 = seg.start
+	var end: Vector3 = seg.end
+	var direction: Vector3 = seg.direction
+	var height: float = seg.length
+
+	if node.bark_rings.size() < 2:
+		_render_branch_skinned(node_id)
+		return
+
+	if node.locked_wobble.is_empty():
+		node.locked_wobble = BranchMeshBuilder.generate_locked_wobble(
+			node.id,
+			radial_segments,
+			bark_variation
+		)
+
+	var scaled_rings: Array = []
+	for ring in node.bark_rings:
+		if not ring is Dictionary:
+			continue
+		var scaled: Dictionary = ring.duplicate()
+		scaled["radius"] = float(ring.get("radius", 0.02)) * thickness_visual_scale
+		scaled_rings.append(scaled)
+
+	var close_end: bool = node.cut_timestamp < 0.0
+	var bark_meshes: Dictionary = BarkGrid.build_branch_mesh(
+		scaled_rings,
+		node.locked_wobble,
+		radial_segments,
+		start,
+		close_end
+	)
+	var branch_mesh: ArrayMesh = bark_meshes.get("surface")
+	if branch_mesh == null:
+		_render_branch_skinned(node_id)
+		return
+
+	var mesh_instance := _get_segment(node_id)
+	mesh_instance.visible = true
+	mesh_instance.mesh = branch_mesh
+	mesh_instance.position = Vector3.ZERO
+	mesh_instance.basis = Basis.IDENTITY
+	mesh_instance.material_override = graft_material if node.is_graft else trunk_material
+
+	if show_wood_wireframe:
+		_render_bark_wireframe(node_id, bark_meshes.get("wireframe"), Vector3.ZERO)
 
 	if node.is_graft:
 		var graft_marker := _get_graft_marker(node_id)
@@ -774,7 +920,8 @@ func _uses_profile_guides() -> bool:
 
 func _uses_fork_hubs() -> bool:
 	return branch_mesh_mode == BranchMeshMode.SWEPT_TUBE \
-		or branch_mesh_mode == BranchMeshMode.RING_LOFT
+		or branch_mesh_mode == BranchMeshMode.RING_LOFT \
+		or branch_mesh_mode == BranchMeshMode.BARK_GRID
 
 
 func _should_skip_fork_hub(parent_id: int) -> bool:

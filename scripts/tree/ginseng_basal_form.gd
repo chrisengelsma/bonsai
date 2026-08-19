@@ -1,22 +1,35 @@
 class_name GinsengBasalForm
 extends RefCounted
 
-const CAUDEX_HEIGHT := 0.105
-const NECK_LENGTH := 0.04
-const CROWN_STEM_LENGTH := 0.05
+const START_CAUDEX_HEIGHT := 0.076
+const MAX_CAUDEX_HEIGHT := 0.72
+const NECK_LENGTH := 0.03
+const CROWN_STEM_LENGTH := 0.028
+const LOBE_SCALE_MIN := 0.72
+const LOBE_SCALE_MAX := 1.12
 
 
-static func build(graph, pattern) -> int:
+static func roll_lobe_scales(rng: RandomNumberGenerator, arc_count: int) -> Array:
+	var scales: Array = []
+	for _i in range(clampi(arc_count, 1, 4)):
+		scales.append(rng.randf_range(LOBE_SCALE_MIN, LOBE_SCALE_MAX))
+	return scales
+
+
+static func build(graph, pattern, arc_count: int = -1) -> int:
 	var neck_thickness: float = maxf(pattern.branch_thickness * 1.05, pattern.trunk_thickness * 0.38)
 	var crown_thickness: float = maxf(pattern.branch_thickness * 1.1, pattern.trunk_thickness * 0.4)
 
 	graph.has_caudex = true
-	graph.caudex_arc_count = clampi(pattern.basal_arc_count, 2, 4)
-	graph.caudex_height = CAUDEX_HEIGHT
-	graph.caudex_bulk_radius = pattern.trunk_thickness * 0.92
+	var count: int = arc_count if arc_count >= 1 else pattern.basal_arc_count
+	graph.caudex_arc_count = clampi(count, 1, 4)
+	graph.caudex_lobe_scales = roll_lobe_scales(graph.get_rng(), graph.caudex_arc_count)
+	graph.caudex_height = START_CAUDEX_HEIGHT
+	graph.caudex_max_height = _resolve_max_height(pattern)
+	graph.caudex_bulk_radius = maxf(pattern.trunk_thickness * 0.2, 0.0048)
 
 	var anchor = graph._create_node(-1, Vector3.UP, neck_thickness, 0)
-	anchor.length = CAUDEX_HEIGHT
+	anchor.length = START_CAUDEX_HEIGHT
 	anchor.base_thickness = neck_thickness
 	anchor.thickness = neck_thickness
 	anchor.freeze_length = true
@@ -49,3 +62,9 @@ static func build(graph, pattern) -> int:
 
 	graph.root_id = anchor.id
 	return crown.id
+
+
+static func _resolve_max_height(pattern) -> float:
+	if pattern != null and pattern.caudex_max_height > 0.0:
+		return pattern.caudex_max_height
+	return MAX_CAUDEX_HEIGHT

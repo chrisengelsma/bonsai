@@ -2,6 +2,8 @@ class_name TreeGraph
 extends RefCounted
 
 const BranchNodeClass = preload("res://scripts/tree/branch_node.gd")
+const GinsengCaudexMesh = preload("res://scripts/tree/ginseng_caudex_mesh.gd")
+const BranchSegment = preload("res://scripts/tree/branch_segment.gd")
 const LSystemInterpreter = preload("res://scripts/tree/lsystem_interpreter.gd")
 const GrowthLimits = preload("res://scripts/tree/growth_limits.gd")
 const GrowthStep = preload("res://scripts/tree/growth_step.gd")
@@ -19,6 +21,7 @@ const BasalRadiusProfile = preload("res://scripts/tree/basal_radius_profile.gd")
 const GinsengBasalForm = preload("res://scripts/tree/ginseng_basal_form.gd")
 const CaudexGrowthModel = preload("res://scripts/tree/caudex_growth_model.gd")
 const BranchMeshBuilder = preload("res://scripts/tree/branch_mesh_builder.gd")
+const BarkGrid = preload("res://scripts/tree/bark_grid.gd")
 
 const JOINT_COLLAR_LENGTH_FRAC := 0.38
 const FORK_TAPER_MIN_LENGTH := 0.038
@@ -41,11 +44,14 @@ var _rng := RandomNumberGenerator.new()
 var _allow_prune_spawn: bool = false
 var _auxin_levels: Dictionary = {}
 var _attractor_field: CrownAttractorField = null
+var bark_radial_segments: int = BarkGrid.DEFAULT_RADIAL_SEGMENTS
 
 var has_caudex: bool = false
 var caudex_bulk_radius: float = 0.0
 var caudex_arc_count: int = 3
-var caudex_height: float = 0.105
+var caudex_lobe_scales: Array = []
+var caudex_height: float = GinsengBasalForm.START_CAUDEX_HEIGHT
+var caudex_max_height: float = GinsengBasalForm.MAX_CAUDEX_HEIGHT
 
 const PATH_RADIUS_DECAY := 2.05
 
@@ -62,10 +68,12 @@ func clear() -> void:
 	has_caudex = false
 	caudex_bulk_radius = 0.0
 	caudex_arc_count = 3
-	caudex_height = 0.105
+	caudex_lobe_scales = []
+	caudex_height = GinsengBasalForm.START_CAUDEX_HEIGHT
+	caudex_max_height = GinsengBasalForm.MAX_CAUDEX_HEIGHT
 
 
-func create_from_species(species_resource) -> void:
+func create_from_species(species_resource, caudex_arc_count: int = -1) -> void:
 	clear()
 	species = species_resource
 	species_id = species_resource.id
@@ -74,7 +82,7 @@ func create_from_species(species_resource) -> void:
 		_thickness_falloff = pattern.thickness_falloff
 		_growth_pattern = pattern
 	if species_resource.starter_graph.is_empty():
-		_create_default_starter(species_resource, pattern)
+		_create_default_starter(species_resource, pattern, caudex_arc_count)
 	else:
 		from_dict(species_resource.starter_graph)
 
@@ -90,13 +98,13 @@ func create_from_lab_pattern(species_resource, pattern) -> void:
 	init_attractors_from_preset(pattern)
 
 
-func _create_default_starter(species, pattern) -> void:
+func _create_default_starter(species, pattern, caudex_arc_count: int = -1) -> void:
 	if pattern == null:
 		pattern = species.grow_pattern
 
 	var basal_form: String = str(species.basal_form if species else BasalForm.STANDARD)
 	if basal_form == BasalForm.GINSENG_CAUDEX:
-		GinsengBasalForm.build(self, pattern)
+		GinsengBasalForm.build(self, pattern, caudex_arc_count)
 		return
 
 	var root_thickness: float = pattern.trunk_thickness
@@ -173,9 +181,6 @@ func grow(delta: float, pattern, moisture_factor: float, speed_mult: float, soil
 		"over_height": over_height,
 		"attractor_field": _attractor_field,
 	})
-
-	if has_caudex:
-		CaudexGrowthModel.accumulate(self, delta, pattern, moisture_factor)
 
 	graph_changed.emit()
 
@@ -318,7 +323,7 @@ func continue_growth_segment(
 
 	var parent = nodes[parent_id]
 	var future_chain: float = parent.length + AxialChain.chain_at_joint(nodes, parent_id)
-	var depth_cap: float = GrowthLimits.max_length_for_depth(parent.depth)
+	var depth_cap: float = GrowthLimits.max_length_for_depth(parent.depth, has_caudex)
 	var child_budget: float = depth_cap - future_chain
 	if child_budget <= 0.001:
 		return false
@@ -546,11 +551,11 @@ func _axial_chain_total(node_id: int) -> float:
 
 
 func _remaining_axial_budget(node_id: int) -> float:
-	return AxialChain.remaining_budget(nodes, node_id)
+	return AxialChain.remaining_budget(nodes, node_id, has_caudex)
 
 
 func _length_budget_for_tip(node_id: int) -> float:
-	return AxialChain.length_budget_for_tip(nodes, node_id)
+	return AxialChain.length_budget_for_tip(nodes, node_id, has_caudex)
 
 
 func _root_core_radius() -> float:
@@ -710,6 +715,20 @@ func _update_branch_profile(node, pattern) -> void:
 	else:
 		_extend_tip_sample(node)
 
+	_sync_bark_grid(node)
+
+
+func _sync_bark_grid(node) -> void:
+	ensure_profile_render_ready(node)
+	node.bark_rings = BarkGrid.sync_from_profile(
+		node.bark_rings,
+		node.ring_samples,
+		func(dist: float) -> float: return get_radius_at_dist(node.id, dist),
+		bark_radial_segments,
+		node.length,
+		node.direction
+	)
+
 
 func ensure_profile_render_ready(node) -> void:
 	if node.ring_samples.is_empty():
@@ -728,15 +747,24 @@ func prepare_all_profiles_for_render() -> void:
 		if not node.children.is_empty():
 			_update_parent_fork_profile(node)
 		_refresh_ring_sample_radii(node)
+		_sync_bark_grid(node)
 
 
-func get_bark_guide_samples(node_id: int, guide_spacing: float, angle_keep_deg: float = 8.0) -> Array:
-	if not nodes.has(node_id):
-		return []
+func get_bark_guide_samples_for_render(
+	node_id: int,
+	guide_spacing: float,
+	render_length: float,
+	angle_keep_deg: float = 8.0
+) -> Array:
+	var samples: Array = get_bark_guide_samples(node_id, guide_spacing, angle_keep_deg)
+	if samples.is_empty() or not nodes.has(node_id):
+		return samples
 	var node = nodes[node_id]
-	ensure_profile_render_ready(node)
-	var guides: Array = decimate_ring_samples(node.ring_samples, guide_spacing, angle_keep_deg)
-	return _samples_with_radii(node_id, guides)
+	return BranchMeshBuilder.finalize_branch_samples(
+		samples,
+		render_length,
+		node.direction
+	)
 
 
 static func decimate_ring_samples(samples: Array, min_spacing: float, angle_keep_deg: float = 8.0) -> Array:
@@ -779,6 +807,15 @@ func _samples_with_radii(node_id: int, samples: Array) -> Array:
 	return result
 
 
+func get_bark_guide_samples(node_id: int, guide_spacing: float, angle_keep_deg: float = 8.0) -> Array:
+	if not nodes.has(node_id):
+		return []
+	var node = nodes[node_id]
+	ensure_profile_render_ready(node)
+	var guides: Array = decimate_ring_samples(node.ring_samples, guide_spacing, angle_keep_deg)
+	return _samples_with_radii(node_id, guides)
+
+
 func _accumulate_cambium_on_path(node_id: int, delta: float, pattern) -> void:
 	var current_id: int = node_id
 	while nodes.has(current_id):
@@ -794,6 +831,8 @@ func _accumulate_cambium_on_path(node_id: int, delta: float, pattern) -> void:
 		var rate: float = pattern.cambium_growth_rate * delta * node.growth_energy
 		if node.is_basal_leg and pattern.basal_cambium_mult > 0.0:
 			rate *= pattern.basal_cambium_mult
+		elif has_caudex and node.depth >= 2:
+			rate *= 0.38
 		elif node.depth == 0 and not node.is_caudex_anchor:
 			rate *= 1.45
 		elif pattern.basal_bulge_strength > 0.0 and node.depth >= 2:
@@ -803,6 +842,9 @@ func _accumulate_cambium_on_path(node_id: int, delta: float, pattern) -> void:
 
 		node.cambium_thickness += rate
 		node.thickness = minf(node.base_thickness + node.cambium_thickness, max_radius)
+
+		if has_caudex and (node.is_caudex_anchor or node.depth == 1):
+			CaudexGrowthModel.accumulate_from_cambium(self, rate, pattern)
 
 		if node.parent_id < 0:
 			break
@@ -912,6 +954,8 @@ func prune_at_point(branch_id: int, local_hit: Vector3, sole_seed: bool = false)
 	node.is_growing_tip = false
 
 	_truncate_branch_profile(node, along)
+	_sync_bark_grid(node)
+	BarkGrid.mark_tip_capped(node.bark_rings)
 
 	if sole_seed:
 		for node_id in nodes.keys():
@@ -1135,6 +1179,36 @@ func get_joint(node_id: int) -> Vector3:
 	return get_world_tip(node.parent_id)
 
 
+func get_render_branch_segment(node_id: int) -> Dictionary:
+	var segment: Dictionary = BranchSegment._segment_from_graph(self, node_id)
+	if not has_caudex or not nodes.has(node_id):
+		return segment
+
+	var node = nodes[node_id]
+	if not _is_ginseng_stem_segment(node):
+		return segment
+
+	var neck_radius: float = node.base_thickness + node.cambium_thickness
+	var stem_base_y: float = caudex_height - GinsengCaudexMesh.neck_embed_depth(
+		caudex_height,
+		caudex_bulk_radius,
+		neck_radius
+	)
+	if segment.start.y <= stem_base_y + 0.001:
+		return segment
+
+	var direction: Vector3 = segment.direction
+	var pull: float = segment.start.y - stem_base_y
+	segment.start = segment.start - direction * pull
+	segment.end = segment.start + direction * (segment.length + pull)
+	segment.length = segment.start.distance_to(segment.end)
+	return segment
+
+
+func _is_ginseng_stem_segment(node) -> bool:
+	return node.depth == 1 and node.parent_id == root_id and nodes[root_id].is_caudex_anchor
+
+
 func get_world_tip(node_id: int) -> Vector3:
 	if not nodes.has(node_id):
 		return Vector3.ZERO
@@ -1142,6 +1216,8 @@ func get_world_tip(node_id: int) -> Vector3:
 
 
 func _branch_tip_offset(node) -> Vector3:
+	if node.is_caudex_anchor:
+		return node.direction.normalized() * node.length
 	if node.ring_samples.size() >= 2:
 		var centers: Array = BranchMeshBuilder.compute_sample_centers(node.ring_samples)
 		return centers[-1]
@@ -1191,7 +1267,7 @@ func _enforce_active_tip_budget() -> void:
 
 
 func _is_over_height_limit() -> bool:
-	return get_tree_height() >= GrowthLimits.MAX_TREE_HEIGHT
+	return get_tree_height() >= GrowthLimits.max_tree_height(has_caudex)
 
 
 func get_tree_height() -> float:
@@ -1237,7 +1313,9 @@ func to_dict() -> Dictionary:
 		"has_caudex": has_caudex,
 		"caudex_bulk_radius": caudex_bulk_radius,
 		"caudex_arc_count": caudex_arc_count,
+		"caudex_lobe_scales": caudex_lobe_scales.duplicate(),
 		"caudex_height": caudex_height,
+		"caudex_max_height": caudex_max_height,
 	}
 	if _attractor_field != null:
 		data["attractor_field"] = _attractor_field.to_dict()
@@ -1260,7 +1338,17 @@ func from_dict(data: Dictionary) -> void:
 	has_caudex = bool(data.get("has_caudex", false))
 	caudex_bulk_radius = float(data.get("caudex_bulk_radius", 0.0))
 	caudex_arc_count = int(data.get("caudex_arc_count", 3))
-	caudex_height = float(data.get("caudex_height", 0.105))
+	var loaded_scales = data.get("caudex_lobe_scales", [])
+	if loaded_scales is Array and not loaded_scales.is_empty():
+		caudex_lobe_scales = loaded_scales.duplicate()
+	elif has_caudex:
+		caudex_lobe_scales = GinsengBasalForm.roll_lobe_scales(_rng, caudex_arc_count)
+	else:
+		caudex_lobe_scales = []
+	caudex_height = float(data.get("caudex_height", GinsengBasalForm.START_CAUDEX_HEIGHT))
+	caudex_max_height = float(data.get("caudex_max_height", GinsengBasalForm.MAX_CAUDEX_HEIGHT))
+	if has_caudex:
+		CaudexGrowthModel._sync_anchor_length(self)
 	var attractor_data: Dictionary = data.get("attractor_field", {})
 	if not attractor_data.is_empty():
 		_attractor_field = CrownAttractorField.new()

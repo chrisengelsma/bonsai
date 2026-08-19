@@ -100,6 +100,7 @@ func _apply_preset_to_material() -> void:
 	_material.set_shader_parameter("sway_amount", _preset.sway_amount)
 	_material.set_shader_parameter("sway_speed", _preset.sway_speed)
 	_material.set_shader_parameter("underside_darken", _preset.underside_darken)
+	_material.set_shader_parameter("petiole_length", _petiole_length_for_style(_preset.mesh_style))
 
 
 func _resolve_albedo_color() -> Color:
@@ -108,6 +109,20 @@ func _resolve_albedo_color() -> Color:
 	if _preset != null:
 		return _preset.albedo_color
 	return Color(0.42, 0.56, 0.44)
+
+
+func _petiole_length_for_style(style: int) -> float:
+	match style:
+		FoliagePreset.MeshStyle.BROADLEAF:
+			return 0.009
+		FoliagePreset.MeshStyle.NEEDLE:
+			return 0.004
+		FoliagePreset.MeshStyle.SCALE:
+			return 0.003
+		FoliagePreset.MeshStyle.CLUSTER:
+			return 0.02
+		_:
+			return 0.009
 
 
 func _update_wind_uniforms() -> void:

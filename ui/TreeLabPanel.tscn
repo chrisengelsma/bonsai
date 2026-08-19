@@ -67,6 +67,47 @@ theme_override_constants/separation = 6
 unique_name_in_owner = true
 layout_mode = 2
 
+[node name="CaudexRootsLabel" type="Label" parent="Panel/Scroll/VBox/PresetSection/PresetVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Caudex roots: 3"
+
+[node name="CaudexRootsSlider" type="HSlider" parent="Panel/Scroll/VBox/PresetSection/PresetVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 1.0
+max_value = 4.0
+step = 1.0
+value = 3.0
+tick_count = 4
+ticks_on_borders = true
+
+[node name="CaudexHeightLabel" type="Label" parent="Panel/Scroll/VBox/PresetSection/PresetVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Caudex height: 0.72"
+
+[node name="CaudexHeightSlider" type="HSlider" parent="Panel/Scroll/VBox/PresetSection/PresetVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.15
+max_value = 0.95
+step = 0.01
+value = 0.72
+
+[node name="CaudexSpreadLabel" type="Label" parent="Panel/Scroll/VBox/PresetSection/PresetVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Caudex spread: 3.20"
+
+[node name="CaudexSpreadSlider" type="HSlider" parent="Panel/Scroll/VBox/PresetSection/PresetVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 1.0
+max_value = 4.5
+step = 0.02
+value = 3.2
+
 [node name="LSystemRulesSection" type="FoldableContainer" parent="Panel/Scroll/VBox"]
 layout_mode = 2
 title = "L-System Rules"
@@ -564,7 +605,7 @@ text = "Camera distance: 3.0"
 [node name="CameraDistanceSlider" type="HSlider" parent="Panel/Scroll/VBox/DisplaySection/DisplayVBox"]
 unique_name_in_owner = true
 layout_mode = 2
-min_value = 1.0
+min_value = 0.06
 max_value = 15.0
 step = 0.1
 value = 3.0
@@ -617,6 +658,11 @@ text = "Apply & Reset"
 unique_name_in_owner = true
 layout_mode = 2
 text = "Reset (same rules)"
+
+[node name="LeafLabButton" type="Button" parent="Panel/Scroll/VBox/ActionsVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Leaf Lab"
 
 [node name="MainButton" type="Button" parent="Panel/Scroll/VBox/ActionsVBox"]
 unique_name_in_owner = true

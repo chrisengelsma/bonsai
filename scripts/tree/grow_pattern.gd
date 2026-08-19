@@ -55,6 +55,10 @@ extends Resource
 ## Cambium rate multiplier on basal leg nodes.
 @export var basal_cambium_mult: float = 1.0
 @export var basal_arc_count: int = 3
+## Scales caudex bulk/height accumulation (ginseng form only).
+@export var caudex_growth_mult: float = 1.0
+## Maximum caudex height (ginseng form only).
+@export var caudex_max_height: float = 0.48
 
 var _rules_cache: Dictionary = {}
 
